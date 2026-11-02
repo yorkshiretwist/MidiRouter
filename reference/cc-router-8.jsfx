@@ -1,0 +1,98 @@
+desc: CC-switched MIDI router (8 outputs, MIDI learn, note-off and sustain tracking)
+slider1:0<0,7,1{1,2,3,4,5,6,7,8}>Active output
+slider2:20<0,127,1>Output 1: trigger CC
+slider3:127<-1,127,1>Output 1: trigger value (-1 = any)
+slider4:21<0,127,1>Output 2: trigger CC
+slider5:127<-1,127,1>Output 2: trigger value (-1 = any)
+slider6:22<0,127,1>Output 3: trigger CC
+slider7:127<-1,127,1>Output 3: trigger value (-1 = any)
+slider8:23<0,127,1>Output 4: trigger CC
+slider9:127<-1,127,1>Output 4: trigger value (-1 = any)
+slider10:24<0,127,1>Output 5: trigger CC
+slider11:127<-1,127,1>Output 5: trigger value (-1 = any)
+slider12:25<0,127,1>Output 6: trigger CC
+slider13:127<-1,127,1>Output 6: trigger value (-1 = any)
+slider14:26<0,127,1>Output 7: trigger CC
+slider15:127<-1,127,1>Output 7: trigger value (-1 = any)
+slider16:27<0,127,1>Output 8: trigger CC
+slider17:127<-1,127,1>Output 8: trigger value (-1 = any)
+slider18:0<0,8,1{Off,Output 1,Output 2,Output 3,Output 4,Output 5,Output 6,Output 7,Output 8}>MIDI Learn
+in_pin:none
+out_pin:none
+
+@init
+notes = 0;      // [inChannel*128 + note] -> output+1 (0 = not held)
+sus = 2048;     // [output] -> 1 if sustain is held on that output
+memset(0, 0, 2056);
+
+@block
+while (midirecv(offset, msg1, msg2, msg3)) (
+  type  = msg1 & 0xF0;
+  ch    = msg1 & 0x0F;
+  out   = slider1;
+  learn = slider18;
+
+  // Is this CC number used as a trigger by any output?
+  isTrig = (type == 0xB0 &&
+            (msg2 == slider2  || msg2 == slider4  || msg2 == slider6  || msg2 == slider8 ||
+             msg2 == slider10 || msg2 == slider12 || msg2 == slider14 || msg2 == slider16));
+
+  learn > 0 && type == 0xB0 ? (
+    // MIDI Learn: store this CC number and value for the selected output; swallow it
+    learn == 1 ? (slider2  = msg2; slider3  = msg3; sliderchange(slider2);  sliderchange(slider3))  :
+    learn == 2 ? (slider4  = msg2; slider5  = msg3; sliderchange(slider4);  sliderchange(slider5))  :
+    learn == 3 ? (slider6  = msg2; slider7  = msg3; sliderchange(slider6);  sliderchange(slider7))  :
+    learn == 4 ? (slider8  = msg2; slider9  = msg3; sliderchange(slider8);  sliderchange(slider9))  :
+    learn == 5 ? (slider10 = msg2; slider11 = msg3; sliderchange(slider10); sliderchange(slider11)) :
+    learn == 6 ? (slider12 = msg2; slider13 = msg3; sliderchange(slider12); sliderchange(slider13)) :
+    learn == 7 ? (slider14 = msg2; slider15 = msg3; sliderchange(slider14); sliderchange(slider15)) :
+    learn == 8 ? (slider16 = msg2; slider17 = msg3; sliderchange(slider16); sliderchange(slider17));
+    slider18 = 0;
+    sliderchange(slider18);
+  ) : isTrig ? (
+    // Find the first output whose CC and value both match; never pass it on
+    idx = -1;
+    msg2 == slider2  && (slider3  < 0 || msg3 == slider3)  ? (idx = 0) :
+    msg2 == slider4  && (slider5  < 0 || msg3 == slider5)  ? (idx = 1) :
+    msg2 == slider6  && (slider7  < 0 || msg3 == slider7)  ? (idx = 2) :
+    msg2 == slider8  && (slider9  < 0 || msg3 == slider9)  ? (idx = 3) :
+    msg2 == slider10 && (slider11 < 0 || msg3 == slider11) ? (idx = 4) :
+    msg2 == slider12 && (slider13 < 0 || msg3 == slider13) ? (idx = 5) :
+    msg2 == slider14 && (slider15 < 0 || msg3 == slider15) ? (idx = 6) :
+    msg2 == slider16 && (slider17 < 0 || msg3 == slider17) ? (idx = 7);
+    idx >= 0 ? (
+      slider1 = idx;
+      sliderchange(slider1);
+    );
+  ) : type == 0x90 && msg3 > 0 ? (
+    // Note-on: remember which output it went to
+    notes[ch*128 + msg2] = out + 1;
+    midisend(offset, 0x90 | out, msg2, msg3);
+  ) : type == 0x80 || type == 0x90 || type == 0xA0 ? (
+    // Note-off (incl. note-on vel 0) or poly aftertouch: follow the note
+    held = notes[ch*128 + msg2];
+    held ? out = held - 1;
+    type != 0xA0 ? notes[ch*128 + msg2] = 0;
+    midisend(offset, type | out, msg2, msg3);
+  ) : type == 0xB0 && msg2 == 64 ? (
+    msg3 >= 64 ? (
+      // Sustain down: active output only
+      sus[out] = 1;
+      midisend(offset, 0xB0 | out, 64, msg3);
+    ) : (
+      // Sustain up: active output plus any output still sustaining
+      i = 0;
+      loop(8,
+        sus[i] || i == out ? midisend(offset, 0xB0 | i, 64, msg3);
+        sus[i] = 0;
+        i += 1;
+      );
+    );
+  ) : type < 0xF0 ? (
+    // All other channel messages: active output
+    midisend(offset, type | out, msg2, msg3);
+  ) : (
+    // System messages: unchanged
+    midisend(offset, msg1, msg2, msg3);
+  );
+);

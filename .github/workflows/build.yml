@@ -1,0 +1,181 @@
+name: midirouter-build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+
+env:
+  BUILD_TYPE: Release
+  BUILD_DIR: build
+  PROJECT_NAME: MidiRouter
+  PRODUCT_NAME: MidiRouter
+  JUCE_VERSION: 9.0.0
+  DISPLAY: :0 # linux pluginval needs this
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false # show all errors for each platform (vs. cancel jobs on error)
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            pluginval-binary: ./pluginval
+            extra-flags: -G Ninja
+          - name: macOS
+            os: macos-latest
+            pluginval-binary: pluginval.app/Contents/MacOS/pluginval
+            extra-flags: -G Ninja -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          - name: Windows
+            os: windows-latest
+            pluginval-binary: ./pluginval.exe
+
+    steps:
+      # Use clang on Linux so we don't introduce a 3rd compiler (Windows and macOS use MSVC and Clang)
+      - name: Set up Clang
+        if: runner.os == 'Linux'
+        uses: egor-tensin/setup-clang@v1
+
+      # This also starts up our "fake" display (Xvfb), needed for pluginval
+      - name: Install JUCE's Linux Deps
+        if: runner.os == 'Linux'
+        # Official list of Linux deps: https://github.com/juce-framework/JUCE/blob/master/docs/Linux%20Dependencies.md
+        run: |
+          sudo apt-get update && sudo apt install ninja-build libasound2-dev libjack-jackd2-dev \
+              ladspa-sdk \
+              libfreetype-dev libfontconfig1-dev \
+              libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+              libglu1-mesa-dev mesa-common-dev xvfb
+          sudo /usr/bin/Xvfb $DISPLAY &
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: "Preparation"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: "(JUCE) Clone Repository"
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: JUCE
+
+      - name: "Create Build Environment"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.extra-flags }}
+
+      - name: "Build"
+        run: cmake --build build --config Release
+
+      - name: "Run unit tests"
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Set version and additional env vars
+        run: |
+          VERSION=$(sed -n 's/.*project(MidiRouter VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          ARTIFACTS_PATH=${{ env.BUILD_DIR }}/${{ env.PROJECT_NAME }}_artefacts/${{ env.BUILD_TYPE }}
+          echo "ARTIFACTS_PATH=$ARTIFACTS_PATH" >> $GITHUB_ENV
+          echo "VST3_PATH=$ARTIFACTS_PATH/VST3/${{ env.PRODUCT_NAME }}.vst3" >> $GITHUB_ENV
+          echo "AU_PATH=$ARTIFACTS_PATH/AU/${{ env.PRODUCT_NAME }}.component" >> $GITHUB_ENV
+          echo "CLAP_PATH=$ARTIFACTS_PATH/CLAP/${{ env.PRODUCT_NAME }}.clap" >> $GITHUB_ENV
+
+      # pluginval is built for audio plugins; a MIDI-only effect exercises less of it,
+      # so a lower strictness level than TrackDeck is used.
+      - name: Pluginval
+        run: |
+          curl -LO "https://github.com/Tracktion/pluginval/releases/download/v1.0.3/pluginval_${{ matrix.name }}.zip"
+          7z x pluginval_${{ matrix.name }}.zip
+          ${{ matrix.pluginval-binary }} --strictness-level 5 --verbose --validate "${{ env.VST3_PATH }}"
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: MidiRouter-${{ matrix.name }}-VST3
+          path: ${{ env.VST3_PATH }}
+
+      - name: Upload CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: MidiRouter-${{ matrix.name }}-CLAP
+          path: ${{ env.CLAP_PATH }}
+
+      - name: Upload AU (macOS only)
+        if: matrix.name == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MidiRouter-${{ matrix.name }}-AU
+          path: ${{ env.AU_PATH }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse release.md into title + notes
+        id: parse
+        run: |
+          TITLE=$(awk '/^# /{sub(/^# /,""); print; exit}' release.md)
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+
+          awk '
+            !skipped && /^# / { skipped=1; next }
+            skipped && !bodystarted && /^$/ { next }
+            { bodystarted=1; print }
+          ' release.md > release_body.md
+
+      - name: Download all format artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Restore executable permissions and zip each one
+        working-directory: artifacts
+        run: |
+          for dir in */; do
+            name="${dir%/}"
+            find "$name" -type f \( -name "*.exe" -o -path "*Contents/MacOS/*" -o -perm -u+x \) -exec chmod +x {} \; 2>/dev/null || true
+
+            case "$name" in
+              *-VST3)            bundle_name="MidiRouter.vst3" ;;
+              *-AU)              bundle_name="MidiRouter.component" ;;
+              *macOS-CLAP)       bundle_name="MidiRouter.clap" ;;
+              *)                 bundle_name="" ;;
+            esac
+
+            if [ -n "$bundle_name" ]; then
+              rm -rf "$bundle_name"          # in case a prior iteration left one behind
+              mv "$name" "$bundle_name"
+              zip -r "${name}-${{ github.ref_name }}.zip" "$bundle_name"
+              rm -rf "$bundle_name"          # don't let this leak into the next iteration
+            else
+              (cd "$name" && zip -r "../${name}-${{ github.ref_name }}.zip" .)
+            fi
+          done
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.parse.outputs.title }}
+          body_path: release_body.md
+          generate_release_notes: true
+          files: artifacts/*.zip

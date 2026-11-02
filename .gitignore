@@ -1,0 +1,15 @@
+# JUCE (cloned next to CMakeLists.txt, see developers.md)
+JUCE/
+
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+.vs/
+.idea/
+*.user
+CMakeUserPresets.json
+
+# macOS
+.DS_Store

@@ -1,0 +1,428 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include "Engine/Router.h"
+
+#include <vector>
+
+using namespace midirouter;
+
+namespace
+{
+    struct Out
+    {
+        int offset;
+        int status, d1, d2;
+        bool operator== (const Out& o) const { return offset == o.offset && status == o.status && d1 == o.d1 && d2 == o.d2; }
+    };
+
+    struct Harness
+    {
+        RouterSettings settings;
+        Router router { settings };
+        std::vector<Out> out;
+
+        Harness()
+        {
+            settings.setResetOnSwitch (false); // most tests don't want the extra reset messages
+        }
+
+        std::vector<Out> send (int status, int d1, int d2 = 0, int offset = 0)
+        {
+            out.clear();
+            router.process ({ offset, (uint8_t) status, (uint8_t) d1, (uint8_t) d2 },
+                            [this] (int o, uint8_t s, uint8_t a, uint8_t b) { out.push_back ({ o, s, a, b }); });
+            return out;
+        }
+
+        std::vector<Out> panic()
+        {
+            out.clear();
+            router.panic (0, [this] (int o, uint8_t s, uint8_t a, uint8_t b) { out.push_back ({ o, s, a, b }); });
+            return out;
+        }
+
+        void configure (int output, TriggerType t, int channel, int number, int value)
+        {
+            auto c = settings.getOutput (output);
+            c.type = t;
+            c.triggerChannel = channel;
+            c.number = number;
+            c.value = value;
+            settings.setOutput (output, c);
+        }
+    };
+
+    using V = std::vector<Out>;
+}
+
+TEST_CASE ("defaults match the JSFX prototype")
+{
+    Harness h;
+    CHECK (h.settings.getNumOutputs() == 8);
+    CHECK (h.settings.getActiveOutput() == 0);
+    for (int i = 0; i < 8; ++i)
+    {
+        auto c = h.settings.getOutput (i);
+        CHECK (c.type == TriggerType::cc);
+        CHECK (c.number == 20 + i);
+        CHECK (c.value == 127);
+        CHECK (c.triggerChannel == 0);
+        CHECK (c.outChannel == i + 1);
+    }
+}
+
+TEST_CASE ("settings clamp out-of-range values")
+{
+    RouterSettings s;
+    OutputConfig c;
+    c.triggerChannel = 99; c.number = -5; c.value = 500; c.outChannel = 0;
+    s.setOutput (0, c);
+    auto r = s.getOutput (0);
+    CHECK (r.triggerChannel == 16);
+    CHECK (r.number == 0);
+    CHECK (r.value == 127);
+    CHECK (r.outChannel == 1);
+    s.setNumOutputs (99);
+    CHECK (s.getNumOutputs() == 16);
+    s.setNumOutputs (0);
+    CHECK (s.getNumOutputs() == 1);
+}
+
+TEST_CASE ("trigger CC switches output and is swallowed")
+{
+    Harness h;
+    CHECK (h.send (0xB0, 22, 127).empty());
+    CHECK (h.settings.getActiveOutput() == 2);
+
+    // Notes now go to channel 3.
+    CHECK (h.send (0x90, 60, 100) == V { { 0, 0x92, 60, 100 } });
+}
+
+TEST_CASE ("trigger CC with non-matching value is swallowed without switching")
+{
+    Harness h;
+    CHECK (h.send (0xB0, 21, 0).empty()); // button release
+    CHECK (h.settings.getActiveOutput() == 0);
+}
+
+TEST_CASE ("CC value -1 matches any value")
+{
+    Harness h;
+    h.configure (3, TriggerType::cc, 0, 30, -1);
+    CHECK (h.send (0xB0, 30, 5).empty());
+    CHECK (h.settings.getActiveOutput() == 3);
+}
+
+TEST_CASE ("trigger channel 0 = any, otherwise must match")
+{
+    Harness h;
+    CHECK (h.send (0xB5, 21, 127).empty());
+    CHECK (h.settings.getActiveOutput() == 1); // any channel
+
+    h.configure (4, TriggerType::cc, 3, 40, 127);
+    // Wrong channel: not a trigger, passes through to the active output (2 -> ch 2).
+    CHECK (h.send (0xB0, 40, 127) == V { { 0, 0xB1, 40, 127 } });
+    CHECK (h.settings.getActiveOutput() == 1);
+    // Right channel (3 -> status low nibble 2).
+    CHECK (h.send (0xB2, 40, 127).empty());
+    CHECK (h.settings.getActiveOutput() == 4);
+}
+
+TEST_CASE ("program change trigger always switches, ignoring value")
+{
+    Harness h;
+    h.configure (2, TriggerType::pc, 0, 7, 55);
+    CHECK (h.send (0xC0, 7).empty());
+    CHECK (h.settings.getActiveOutput() == 2);
+
+    // A different program number is not a trigger: passes to the active channel.
+    CHECK (h.send (0xC0, 8) == V { { 0, 0xC2, 8, 0 } });
+}
+
+TEST_CASE ("a CC with the same number as a PC trigger is not a trigger")
+{
+    Harness h;
+    h.configure (2, TriggerType::pc, 0, 7, -1);
+    CHECK (h.send (0xB0, 7, 100) == V { { 0, 0xB0, 7, 100 } });
+    CHECK (h.settings.getActiveOutput() == 0);
+}
+
+TEST_CASE ("note trigger: note-on switches, note-off and aftertouch are swallowed")
+{
+    Harness h;
+    h.configure (5, TriggerType::note, 0, 36, -1);
+
+    CHECK (h.send (0x90, 36, 1).empty());
+    CHECK (h.settings.getActiveOutput() == 5);
+
+    h.settings.setActiveOutput (0);
+    CHECK (h.send (0x90, 36, 0).empty());   // note-on velocity 0 = note-off: no switch
+    CHECK (h.settings.getActiveOutput() == 0);
+    CHECK (h.send (0x80, 36, 64).empty());  // note-off
+    CHECK (h.send (0xA0, 36, 64).empty());  // poly aftertouch
+    CHECK (h.settings.getActiveOutput() == 0);
+}
+
+TEST_CASE ("lowest-numbered matching output wins")
+{
+    Harness h;
+    h.configure (2, TriggerType::cc, 0, 50, 127);
+    h.configure (6, TriggerType::cc, 0, 50, -1);
+    h.send (0xB0, 50, 127);
+    CHECK (h.settings.getActiveOutput() == 2);
+    h.send (0xB0, 50, 10); // only output 6 matches the value
+    CHECK (h.settings.getActiveOutput() == 6);
+}
+
+TEST_CASE ("triggers on outputs beyond numOutputs are ignored")
+{
+    Harness h;
+    h.settings.setNumOutputs (2);
+    CHECK (h.send (0xB0, 25, 127) == V { { 0, 0xB0, 25, 127 } });
+    CHECK (h.settings.getActiveOutput() == 0);
+}
+
+TEST_CASE ("per-output MIDI channel is used")
+{
+    Harness h;
+    auto c = h.settings.getOutput (0);
+    c.outChannel = 10;
+    h.settings.setOutput (0, c);
+    CHECK (h.send (0x90, 60, 100) == V { { 0, 0x99, 60, 100 } });
+    CHECK (h.send (0xE0, 1, 2) == V { { 0, 0xE9, 1, 2 } });
+}
+
+TEST_CASE ("other channel messages go to the active output with offset preserved")
+{
+    Harness h;
+    h.send (0xB0, 21, 127);
+    CHECK (h.send (0xE3, 0, 64, 17) == V { { 17, 0xE1, 0, 64 } });  // pitch bend
+    CHECK (h.send (0xD0, 33, 0, 5) == V { { 5, 0xD1, 33, 0 } });    // channel pressure
+    CHECK (h.send (0xB0, 1, 99) == V { { 0, 0xB1, 1, 99 } });       // mod wheel
+    CHECK (h.send (0xC0, 3) == V { { 0, 0xC1, 3, 0 } });            // non-trigger PC
+}
+
+TEST_CASE ("system messages pass through unchanged")
+{
+    Harness h;
+    CHECK (h.send (0xF8, 0, 0) == V { { 0, 0xF8, 0, 0 } });
+    CHECK (h.send (0xFA, 0, 0) == V { { 0, 0xFA, 0, 0 } });
+}
+
+TEST_CASE ("note-off follows the output its note-on went to")
+{
+    Harness h;
+    h.send (0x90, 60, 100);           // out 0
+    h.send (0xB0, 22, 127);           // switch to out 2
+    h.send (0x90, 62, 100);           // out 2
+
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 } });
+    CHECK (h.send (0x90, 62, 0) == V { { 0, 0x92, 62, 0 } }); // vel-0 note-on as note-off
+}
+
+TEST_CASE ("poly aftertouch follows the note but keeps the record")
+{
+    Harness h;
+    h.send (0x90, 60, 100);
+    h.send (0xB0, 22, 127);
+    CHECK (h.send (0xA0, 60, 50) == V { { 0, 0xA0, 60, 50 } });
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 } }); // still routed to out 0
+}
+
+TEST_CASE ("note record is cleared on note-off; unknown notes fall back to active output")
+{
+    Harness h;
+    h.send (0x90, 60, 100);
+    h.send (0x80, 60, 0);
+    h.send (0xB0, 22, 127);
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x82, 60, 0 } });
+}
+
+TEST_CASE ("held notes are tracked per input channel")
+{
+    Harness h;
+    h.send (0x90, 60, 100);      // in ch 1 -> out 0
+    h.send (0xB0, 21, 127);      // out 1
+    h.send (0x91, 60, 100);      // in ch 2 -> out 1
+    h.send (0xB0, 22, 127);      // out 2
+
+    CHECK (h.send (0x81, 60, 0) == V { { 0, 0x81, 60, 0 } });
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 } });
+}
+
+TEST_CASE ("note-off is sent on the channel of the output the note-on went to")
+{
+    Harness h;
+    auto c = h.settings.getOutput (0);
+    c.outChannel = 12;
+    h.settings.setOutput (0, c);
+    h.send (0x90, 60, 100);
+    h.send (0xB0, 21, 127);
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x8B, 60, 0 } });
+}
+
+TEST_CASE ("sustain down goes to the active output only")
+{
+    Harness h;
+    CHECK (h.send (0xB0, 64, 127) == V { { 0, 0xB0, 64, 127 } });
+}
+
+TEST_CASE ("sustain up goes to active output and every output still sustaining")
+{
+    Harness h;
+    h.send (0xB0, 64, 127);            // sustain on out 0
+    h.send (0xB0, 22, 127);            // switch to out 2
+    h.send (0xB0, 64, 127);            // sustain on out 2
+    h.send (0xB0, 23, 127);            // switch to out 3 (not sustaining)
+
+    CHECK (h.send (0xB0, 64, 0, 9) == V { { 9, 0xB0, 64, 0 }, { 9, 0xB2, 64, 0 }, { 9, 0xB3, 64, 0 } });
+
+    // Marks are cleared: a second release only reaches the active output.
+    CHECK (h.send (0xB0, 64, 0) == V { { 0, 0xB3, 64, 0 } });
+}
+
+TEST_CASE ("sustain pedal threshold is 64")
+{
+    Harness h;
+    CHECK (h.send (0xB0, 64, 64) == V { { 0, 0xB0, 64, 64 } });
+    h.send (0xB0, 21, 127);
+    // value 63 is "up": reaches out 0 (still sustaining) and out 1 (active)
+    CHECK (h.send (0xB0, 64, 63) == V { { 0, 0xB0, 64, 63 }, { 0, 0xB1, 64, 63 } });
+}
+
+TEST_CASE ("MIDI learn captures a CC with its channel and value, and swallows it")
+{
+    Harness h;
+    h.settings.startLearn (3);
+    CHECK (h.send (0xB4, 77, 99).empty());
+
+    auto c = h.settings.getOutput (3);
+    CHECK (c.type == TriggerType::cc);
+    CHECK (c.triggerChannel == 5);
+    CHECK (c.number == 77);
+    CHECK (c.value == 99);
+    CHECK (h.settings.getLearnTarget() == -1);
+    CHECK (h.settings.getActiveOutput() == 0); // learn does not switch
+
+    // Learn has disarmed, so the same message is now a trigger.
+    CHECK (h.send (0xB4, 77, 99).empty());
+    CHECK (h.settings.getActiveOutput() == 3);
+}
+
+TEST_CASE ("MIDI learn captures program changes and notes with value -1")
+{
+    Harness h;
+    h.settings.startLearn (1);
+    CHECK (h.send (0xC2, 12).empty());
+    auto c = h.settings.getOutput (1);
+    CHECK (c.type == TriggerType::pc);
+    CHECK (c.triggerChannel == 3);
+    CHECK (c.number == 12);
+    CHECK (c.value == -1);
+
+    h.settings.startLearn (2);
+    CHECK (h.send (0x93, 48, 90).empty());
+    c = h.settings.getOutput (2);
+    CHECK (c.type == TriggerType::note);
+    CHECK (c.triggerChannel == 4);
+    CHECK (c.number == 48);
+    CHECK (c.value == -1);
+}
+
+TEST_CASE ("MIDI learn ignores other messages and note-offs while armed")
+{
+    Harness h;
+    h.settings.startLearn (0);
+    CHECK (h.send (0xE0, 0, 64) == V { { 0, 0xE0, 0, 64 } });
+    CHECK (h.send (0x90, 60, 0) == V { { 0, 0x90, 60, 0 } });
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 } });
+    CHECK (h.settings.getLearnTarget() == 0);
+}
+
+TEST_CASE ("MIDI learn can be cancelled")
+{
+    Harness h;
+    h.settings.startLearn (0);
+    h.settings.cancelLearn();
+    CHECK (h.send (0xB0, 90, 1) == V { { 0, 0xB0, 90, 1 } });
+    CHECK (h.settings.getOutput (0).number == 20);
+}
+
+TEST_CASE ("learn works even when the message matches an existing trigger")
+{
+    Harness h;
+    h.settings.startLearn (4);
+    CHECK (h.send (0xB0, 21, 127).empty());
+    CHECK (h.settings.getOutput (4).number == 21);
+    CHECK (h.settings.getActiveOutput() == 0);
+}
+
+TEST_CASE ("switching resets pitch bend and mod wheel on the output being left")
+{
+    Harness h;
+    h.settings.setResetOnSwitch (true);
+    CHECK (h.send (0xB0, 22, 127) == V { { 0, 0xE0, 0, 64 }, { 0, 0xB0, 1, 0 } });
+    CHECK (h.settings.getActiveOutput() == 2);
+
+    // Re-selecting the already-active output sends nothing.
+    CHECK (h.send (0xB0, 22, 127).empty());
+}
+
+TEST_CASE ("reset on switch can be disabled and skips shared channels")
+{
+    Harness h;
+    CHECK (h.send (0xB0, 22, 127).empty());
+
+    h.settings.setResetOnSwitch (true);
+    auto c = h.settings.getOutput (3);
+    c.outChannel = 3; // output 3 shares channel 3 with output 2
+    h.settings.setOutput (3, c);
+    CHECK (h.send (0xB0, 23, 127).empty());
+}
+
+TEST_CASE ("panic sends all-notes-off and sustain-off once per distinct channel")
+{
+    Harness h;
+    h.settings.setNumOutputs (3);
+    auto c = h.settings.getOutput (2);
+    c.outChannel = 1; // shares a channel with output 0
+    h.settings.setOutput (2, c);
+
+    CHECK (h.panic() == V { { 0, 0xB0, 123, 0 }, { 0, 0xB0, 64, 0 }, { 0, 0xB1, 123, 0 }, { 0, 0xB1, 64, 0 } });
+}
+
+TEST_CASE ("panic clears note and sustain tracking")
+{
+    Harness h;
+    h.send (0x90, 60, 100);
+    h.send (0xB0, 64, 127);
+    h.send (0xB0, 22, 127);
+    h.panic();
+
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x82, 60, 0 } }); // falls back to active output
+    CHECK (h.send (0xB0, 64, 0) == V { { 0, 0xB2, 64, 0 } }); // output 0 no longer sustaining
+}
+
+TEST_CASE ("beginBlock honours a panic request exactly once")
+{
+    Harness h;
+    h.settings.setNumOutputs (1);
+    h.settings.requestPanic();
+    std::vector<Out> out;
+    auto sink = [&] (int o, uint8_t s, uint8_t a, uint8_t b) { out.push_back ({ o, s, a, b }); };
+    h.router.beginBlock (sink);
+    CHECK (out.size() == 2);
+    out.clear();
+    h.router.beginBlock (sink);
+    CHECK (out.empty());
+}
+
+TEST_CASE ("last received MIDI is recorded, system messages excluded")
+{
+    Harness h;
+    CHECK (h.settings.getLastMidi() == 0);
+    h.send (0xB2, 10, 20);
+    CHECK ((h.settings.getLastMidi() & 0xFFFFFF) == ((0xB2u << 16) | (10u << 8) | 20u));
+    h.send (0xF8, 0, 0);
+    CHECK ((h.settings.getLastMidi() & 0xFFFFFF) == ((0xB2u << 16) | (10u << 8) | 20u));
+}
