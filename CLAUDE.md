@@ -134,8 +134,8 @@ Suggested defaults in brackets.
 3. Should each output's MIDI channel be configurable? [Yes, default 1–8]
 4. Fixed 8 outputs, or configurable count (up to 16)? [Configurable, max 16]
 5. Extras: reset pitch bend / mod wheel on switch; panic button (all notes
-   off + sustain off on all outputs); last-received-MIDI display; standalone
-   app. [All except standalone]
+   off + sustain off on all outputs); last-received-MIDI display. [All]
+   (No standalone app: it makes no sense for a MIDI effect.)
 6. Trigger settings as host parameters, or state only? [State only; active
    output as a parameter]
 7. Licence and minimum OS versions. [Same as TrackDeck]
