@@ -10,15 +10,20 @@ namespace midirouter
     constexpr int maxOutputs = 16;
     constexpr int defaultOutputs = 8;
 
-    enum class TriggerType : int { cc = 0, pc = 1, note = 2 };
+    /** none = the output has no trigger (it can still be selected from the UI or the host). */
+    enum class TriggerType : int { none = 0, cc = 1, pc = 2, note = 3 };
+
+    /** How a CC trigger compares the received value with the configured one. */
+    enum class CompareOp : int { eq = 0, le = 1, ge = 2, lt = 3, gt = 4 };
 
     /** A plain copy of one output's configuration, used for loading/saving. */
     struct OutputConfig
     {
-        TriggerType type = TriggerType::cc;
+        TriggerType type = TriggerType::none;
         int triggerChannel = 0; // 0 = any, 1-16
         int number = 0;         // 0-127
-        int value = -1;         // CC only: -1 = any, 0-127
+        CompareOp op = CompareOp::eq; // CC only
+        int value = 127;        // CC only: -1 = any (op ignored), 0-127
         int outChannel = 1;     // 1-16
     };
 
@@ -47,8 +52,6 @@ namespace midirouter
             for (int i = 0; i < maxOutputs; ++i)
             {
                 OutputConfig c;
-                c.number = 20 + i;
-                c.value = 127;
                 c.outChannel = i + 1;
                 setOutput (i, c);
             }
@@ -58,7 +61,8 @@ namespace midirouter
         {
             const auto& o = outputs[(size_t) clampInt (i, 0, maxOutputs - 1)];
             OutputConfig c;
-            c.type = (TriggerType) clampInt (o.type.load(), 0, 2);
+            c.type = (TriggerType) clampInt (o.type.load(), 0, 3);
+            c.op = (CompareOp) clampInt (o.op.load(), 0, 4);
             c.triggerChannel = o.triggerChannel.load();
             c.number = o.number.load();
             c.value = o.value.load();
@@ -73,6 +77,7 @@ namespace midirouter
             o.type.store ((int) c.type);
             o.triggerChannel.store (clampInt (c.triggerChannel, 0, 16));
             o.number.store (clampInt (c.number, 0, 127));
+            o.op.store ((int) c.op);
             o.value.store (clampInt (c.value, -1, 127));
             o.outChannel.store (clampInt (c.outChannel, 1, 16));
         }
@@ -105,7 +110,7 @@ namespace midirouter
     private:
         struct Output
         {
-            std::atomic<int> type { 0 }, triggerChannel { 0 }, number { 0 }, value { -1 }, outChannel { 1 };
+            std::atomic<int> type { 0 }, triggerChannel { 0 }, number { 0 }, op { 0 }, value { 127 }, outChannel { 1 };
         };
 
         std::array<Output, (size_t) maxOutputs> outputs;

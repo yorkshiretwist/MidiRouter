@@ -53,7 +53,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int numberW = 28, activeW = 28, typeW = 76, fieldW = 64, learnW = 104;
+    static constexpr int numberW = 28, activeW = 28, typeW = 76, fieldW = 64, opW = 56, learnW = 104;
 
 private:
     MidiRouterAudioProcessor& processor;
@@ -63,6 +63,7 @@ private:
 
     ActiveIndicator active;
     juce::ComboBox type;
+    juce::ComboBox op;
     NumberField triggerChannel { 0, 16, true, 0 };
     NumberField number { 0, 127, false, 0 };
     NumberField value { -1, 127, true, -1 };
@@ -94,6 +95,7 @@ private:
     juce::ComboBox outputCount;
     juce::ToggleButton resetOnSwitch { "Reset pitch bend / mod wheel on switch" };
     juce::TextButton panic { "Panic" };
+    juce::TooltipWindow tooltipWindow { this, 500 };
     juce::Label lastMidi;
     juce::Label version;
 

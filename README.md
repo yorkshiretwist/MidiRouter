@@ -7,7 +7,7 @@ It was built for a live rig where a MIDI controller's buttons send fixed message
 ## Features
 
 - Up to **16 outputs** (default 8); output N sends on MIDI channel N by default, and each output's channel can be changed
-- **Triggers** per output: **CC**, **Program Change** or **Note**, with an input channel (or *Any*), a number and, for CC, a value (or *Any*)
+- **Triggers** per output: **None**, **CC**, **Program Change** or **Note**, with a trigger channel (or *Any*), a number and, for CC, a value (or *Any*) with a comparison operator (`=`, `<=`, `>=`, `<`, `>`)
 - **MIDI Learn** on every output — press the button on your controller and the trigger is filled in for you
 - Trigger messages are **swallowed**, so they never reach your instruments
 - **Note-off and sustain tracking** — notes always end on the instrument they started on, and sustain-off reaches every instrument still holding the pedal

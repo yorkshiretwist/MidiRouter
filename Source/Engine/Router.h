@@ -83,6 +83,7 @@ namespace midirouter
                 c.type = type == 0xB0 ? TriggerType::cc : type == 0xC0 ? TriggerType::pc : TriggerType::note;
                 c.triggerChannel = ch + 1;
                 c.number = m.data1;
+                c.op = CompareOp::eq;
                 c.value = type == 0xB0 ? m.data2 : -1;
                 settings.setOutput (learn, c);
                 settings.cancelLearn();
@@ -104,9 +105,11 @@ namespace midirouter
 
                 switch (c.type)
                 {
+                    case TriggerType::none:
+                        break;
                     case TriggerType::cc:
                         matchesType = type == 0xB0;
-                        switches = matchesType && (c.value < 0 || c.value == m.data2);
+                        switches = matchesType && valueMatches (c, m.data2);
                         break;
                     case TriggerType::pc:
                         matchesType = type == 0xC0;
@@ -186,6 +189,22 @@ namespace midirouter
         }
 
     private:
+        static bool valueMatches (const OutputConfig& c, int received)
+        {
+            if (c.value < 0)
+                return true; // "Any": the operator is ignored
+
+            switch (c.op)
+            {
+                case CompareOp::eq: return received == c.value;
+                case CompareOp::le: return received <= c.value;
+                case CompareOp::ge: return received >= c.value;
+                case CompareOp::lt: return received <  c.value;
+                case CompareOp::gt: return received >  c.value;
+            }
+            return false;
+        }
+
         /** Centre pitch bend and zero the mod wheel on the instrument being left. */
         template <class Sink>
         void resetControllers (int offset, int from, int to, Sink& sink)

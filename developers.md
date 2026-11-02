@@ -93,7 +93,7 @@ Catch2 is fetched automatically (needs network on first configure).
 
 ## Tests
 
-`Tests/RouterTests.cpp` covers trigger matching for CC/PC/Note, channel 0 = any, value -1 = any, swallowing of non-switching trigger messages, lowest-output-wins, MIDI Learn (capture, disarm, cancel), note-off and poly-aftertouch tracking per input channel, sustain tracking, pitch bend/mod reset, panic, and per-output channels. Add a test for any behaviour change in the engine.
+`Tests/RouterTests.cpp` covers trigger matching for CC/PC/Note (including the CC comparison operators and the default None type), channel 0 = any, value -1 = any, swallowing of non-switching trigger messages, lowest-output-wins, MIDI Learn (capture, disarm, cancel), note-off and poly-aftertouch tracking per input channel, sustain tracking, pitch bend/mod reset, panic, and per-output channels. Add a test for any behaviour change in the engine.
 
 ## Continuous integration
 

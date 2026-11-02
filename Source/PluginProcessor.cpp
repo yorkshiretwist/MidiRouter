@@ -127,6 +127,7 @@ juce::ValueTree MidiRouterAudioProcessor::routerStateToTree() const
         o.setProperty ("type", (int) c.type, nullptr);
         o.setProperty ("triggerChannel", c.triggerChannel, nullptr);
         o.setProperty ("number", c.number, nullptr);
+        o.setProperty ("op", (int) c.op, nullptr);
         o.setProperty ("value", c.value, nullptr);
         o.setProperty ("outChannel", c.outChannel, nullptr);
         tree.appendChild (o, nullptr);
@@ -147,9 +148,10 @@ void MidiRouterAudioProcessor::routerStateFromTree (const juce::ValueTree& tree)
     {
         const auto o = tree.getChild (i);
         midirouter::OutputConfig c = settings.getOutput (i);
-        c.type = (midirouter::TriggerType) midirouter::clampInt ((int) o.getProperty ("type", (int) c.type), 0, 2);
+        c.type = (midirouter::TriggerType) midirouter::clampInt ((int) o.getProperty ("type", (int) c.type), 0, 3);
         c.triggerChannel = (int) o.getProperty ("triggerChannel", c.triggerChannel);
         c.number = (int) o.getProperty ("number", c.number);
+        c.op = (midirouter::CompareOp) midirouter::clampInt ((int) o.getProperty ("op", (int) c.op), 0, 4);
         c.value = (int) o.getProperty ("value", c.value);
         c.outChannel = (int) o.getProperty ("outChannel", c.outChannel);
         settings.setOutput (i, c);

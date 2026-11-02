@@ -24,6 +24,11 @@ namespace
         Harness()
         {
             settings.setResetOnSwitch (false); // most tests don't want the extra reset messages
+
+            // The plugin ships with no triggers; most tests use the old JSFX layout:
+            // output N listens for CC 19+N = 127 on any channel.
+            for (int i = 0; i < 8; ++i)
+                configure (i, TriggerType::cc, 0, 20 + i, 127);
         }
 
         std::vector<Out> send (int status, int d1, int d2 = 0, int offset = 0)
@@ -48,6 +53,7 @@ namespace
             c.triggerChannel = channel;
             c.number = number;
             c.value = value;
+            c.op = CompareOp::eq;
             settings.setOutput (output, c);
         }
     };
@@ -55,20 +61,91 @@ namespace
     using V = std::vector<Out>;
 }
 
-TEST_CASE ("defaults match the JSFX prototype")
+TEST_CASE ("defaults: eight outputs, no triggers, output N on channel N, reset on switch")
 {
-    Harness h;
-    CHECK (h.settings.getNumOutputs() == 8);
-    CHECK (h.settings.getActiveOutput() == 0);
-    for (int i = 0; i < 8; ++i)
+    RouterSettings s;
+    CHECK (s.getNumOutputs() == 8);
+    CHECK (s.getActiveOutput() == 0);
+    CHECK (s.getResetOnSwitch());
+    for (int i = 0; i < 16; ++i)
     {
-        auto c = h.settings.getOutput (i);
-        CHECK (c.type == TriggerType::cc);
-        CHECK (c.number == 20 + i);
-        CHECK (c.value == 127);
-        CHECK (c.triggerChannel == 0);
+        auto c = s.getOutput (i);
+        CHECK (c.type == TriggerType::none);
         CHECK (c.outChannel == i + 1);
     }
+}
+
+TEST_CASE ("outputs with no trigger never swallow or switch anything")
+{
+    RouterSettings s;
+    s.setResetOnSwitch (false);
+    Router r (s);
+    std::vector<Out> out;
+    auto sink = [&] (int o, uint8_t st, uint8_t a, uint8_t b) { out.push_back ({ o, st, a, b }); };
+
+    r.process ({ 0, 0xB0, 0, 127 }, sink);   // CC 0 = the default number
+    r.process ({ 0, 0xC0, 0, 0 }, sink);
+    r.process ({ 0, 0x90, 0, 100 }, sink);
+    CHECK (out.size() == 3);
+    CHECK (s.getActiveOutput() == 0);
+}
+
+TEST_CASE ("CC value operators")
+{
+    Harness h;
+    auto setOp = [&] (CompareOp op, int value)
+    {
+        auto c = h.settings.getOutput (4);
+        c.op = op;
+        c.value = value;
+        h.settings.setOutput (4, c);
+        h.settings.setActiveOutput (0);
+    };
+    auto switches = [&] (int received) { h.settings.setActiveOutput (0); h.send (0xB0, 24, received); return h.settings.getActiveOutput() == 4; };
+
+    setOp (CompareOp::eq, 64);
+    CHECK (switches (64)); CHECK_FALSE (switches (63)); CHECK_FALSE (switches (65));
+    setOp (CompareOp::le, 64);
+    CHECK (switches (64)); CHECK (switches (0)); CHECK_FALSE (switches (65));
+    setOp (CompareOp::ge, 64);
+    CHECK (switches (64)); CHECK (switches (127)); CHECK_FALSE (switches (63));
+    setOp (CompareOp::lt, 64);
+    CHECK (switches (63)); CHECK_FALSE (switches (64)); CHECK_FALSE (switches (127));
+    setOp (CompareOp::gt, 64);
+    CHECK (switches (65)); CHECK_FALSE (switches (64)); CHECK_FALSE (switches (0));
+}
+
+TEST_CASE ("CC operators still swallow values that do not match")
+{
+    Harness h;
+    auto c = h.settings.getOutput (4);
+    c.op = CompareOp::gt;
+    c.value = 100;
+    h.settings.setOutput (4, c);
+    CHECK (h.send (0xB0, 24, 50).empty());
+    CHECK (h.settings.getActiveOutput() == 0);
+}
+
+TEST_CASE ("Value Any ignores the operator")
+{
+    Harness h;
+    auto c = h.settings.getOutput (4);
+    c.op = CompareOp::gt;
+    c.value = -1;
+    h.settings.setOutput (4, c);
+    h.send (0xB0, 24, 0);
+    CHECK (h.settings.getActiveOutput() == 4);
+}
+
+TEST_CASE ("operators do not affect PC or Note triggers")
+{
+    Harness h;
+    h.configure (2, TriggerType::pc, 0, 7, 55);
+    auto c = h.settings.getOutput (2);
+    c.op = CompareOp::gt;
+    h.settings.setOutput (2, c);
+    h.send (0xC0, 7);
+    CHECK (h.settings.getActiveOutput() == 2);
 }
 
 TEST_CASE ("settings clamp out-of-range values")
@@ -293,6 +370,9 @@ TEST_CASE ("sustain pedal threshold is 64")
 TEST_CASE ("MIDI learn captures a CC with its channel and value, and swallows it")
 {
     Harness h;
+    auto pre = h.settings.getOutput (3);
+    pre.op = CompareOp::gt; // learn resets the operator to "="
+    h.settings.setOutput (3, pre);
     h.settings.startLearn (3);
     CHECK (h.send (0xB4, 77, 99).empty());
 
@@ -301,6 +381,7 @@ TEST_CASE ("MIDI learn captures a CC with its channel and value, and swallows it
     CHECK (c.triggerChannel == 5);
     CHECK (c.number == 77);
     CHECK (c.value == 99);
+    CHECK (c.op == CompareOp::eq);
     CHECK (h.settings.getLearnTarget() == -1);
     CHECK (h.settings.getActiveOutput() == 0); // learn does not switch
 

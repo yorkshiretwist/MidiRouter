@@ -26,7 +26,7 @@ namespace Theme
         inline const juce::Colour titleTextColour { juce::Colours::white };
         constexpr float titleFontSizePx = 18.0f;
 
-        constexpr int widthPx    = 640;
+        constexpr int widthPx    = 660;
         constexpr int marginPx   = 16;
         constexpr int gapPx      = 8;
     }
@@ -45,7 +45,7 @@ namespace Theme
     // The column headings above the output rows
     namespace ColumnHeader
     {
-        constexpr int heightPx = 22;
+        constexpr int heightPx = 30; // room for two lines, e.g. "Trigger channel"
 
         inline const juce::Colour textColour { juce::Colours::lightgrey };
         constexpr float fontSizePx = 11.0f;
@@ -110,7 +110,7 @@ namespace Theme
     // Checkbox and other secondary controls
     namespace SecondaryControl
     {
-        inline const juce::Colour tickColour   { 0xff6366f1 };
+        inline const juce::Colour tickColour   { 0xff41d67c }; // bright so a ticked box is obvious on the dark background
         inline const juce::Colour borderColour { 0xff6366f1 };
         inline const juce::Colour textColour   { juce::Colours::white };
     }

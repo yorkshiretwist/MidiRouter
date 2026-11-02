@@ -82,13 +82,21 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     active.setTooltip ("Make output " + juce::String (index + 1) + " the active output");
     active.onClick = [this] { processor.setActiveOutputFromUI (index); };
 
-    type.addItem ("CC", 1);
-    type.addItem ("PC", 2);
-    type.addItem ("Note", 3);
-    type.setColour (juce::ComboBox::backgroundColourId, Theme::Field::backgroundColour);
-    type.setColour (juce::ComboBox::outlineColourId, Theme::Field::borderColour);
-    type.setColour (juce::ComboBox::textColourId, Theme::Field::textColour);
-    type.setColour (juce::ComboBox::arrowColourId, Theme::Field::textColour);
+    auto styleCombo = [] (juce::ComboBox& box)
+    {
+        box.setColour (juce::ComboBox::backgroundColourId, Theme::Field::backgroundColour);
+        box.setColour (juce::ComboBox::outlineColourId, Theme::Field::borderColour);
+        box.setColour (juce::ComboBox::textColourId, Theme::Field::textColour);
+        box.setColour (juce::ComboBox::arrowColourId, Theme::Field::textColour);
+    };
+
+    // Item ids are the enum value + 1.
+    type.addItem ("None", 1);
+    type.addItem ("CC", 2);
+    type.addItem ("PC", 3);
+    type.addItem ("Note", 4);
+    type.setTooltip ("What kind of message selects this output. None = no trigger (select it with the circle instead)");
+    styleCombo (type);
     type.onChange = [this]
     {
         auto c = settings.getOutput (index);
@@ -96,6 +104,21 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
         settings.setOutput (index, c);
     };
     addAndMakeVisible (type);
+
+    op.addItem ("=", 1);
+    op.addItem ("<=", 2);
+    op.addItem (">=", 3);
+    op.addItem ("<", 4);
+    op.addItem (">", 5);
+    op.setTooltip ("How the received CC value is compared with Value: = exactly, <= below or equal, >= above or equal, < below, > above");
+    styleCombo (op);
+    op.onChange = [this]
+    {
+        auto c = settings.getOutput (index);
+        c.op = (midirouter::CompareOp) (op.getSelectedId() - 1);
+        settings.setOutput (index, c);
+    };
+    addAndMakeVisible (op);
 
     auto bind = [this] (NumberField& f, int midirouter::OutputConfig::*member, const juce::String& tip)
     {
@@ -110,10 +133,10 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
         addAndMakeVisible (f);
     };
 
-    bind (triggerChannel, &midirouter::OutputConfig::triggerChannel, "Input channel to listen on (Any, or 1-16)");
+    bind (triggerChannel, &midirouter::OutputConfig::triggerChannel, "The channel the trigger message must arrive on (Any, or 1-16)");
     bind (number, &midirouter::OutputConfig::number, "CC number / program number / note number (0-127)");
-    bind (value, &midirouter::OutputConfig::value, "CC value to match (Any, or 0-127). Ignored for PC and Note");
-    bind (outChannel, &midirouter::OutputConfig::outChannel, "MIDI channel this output sends on (1-16)");
+    bind (value, &midirouter::OutputConfig::value, "CC value to compare against (Any, or 0-127). Any matches every value. Not used for PC and Note");
+    bind (outChannel, &midirouter::OutputConfig::outChannel, "The MIDI channel this output sends on (1-16). Set the MIDI Channel Filter in front of the matching instrument to the same channel");
 
     learn.setClickingTogglesState (false);
     learn.setColour (juce::TextButton::buttonColourId, Theme::LearnButton::backgroundColour);
@@ -146,10 +169,21 @@ void OutputRow::refresh()
     value.refresh();
     outChannel.refresh();
 
-    // The value only matters for CC triggers.
+    if (op.getSelectedId() != (int) c.op + 1)
+        op.setSelectedId ((int) c.op + 1, juce::dontSendNotification);
+
+    // Which fields matter depends on the trigger type.
+    auto show = [] (juce::Component& comp, bool enabled)
+    {
+        comp.setEnabled (enabled);
+        comp.setAlpha (enabled ? 1.0f : 0.4f);
+    };
+    const bool hasTrigger = c.type != midirouter::TriggerType::none;
     const bool isCC = c.type == midirouter::TriggerType::cc;
-    value.setEnabled (isCC);
-    value.setAlpha (isCC ? 1.0f : 0.4f);
+    show (triggerChannel, hasTrigger);
+    show (number, hasTrigger);
+    show (op, isCC && c.value >= 0); // "Any" ignores the operator
+    show (value, isCC);
 
     learn.setButtonText (learning ? "Cancel" : "Learn");
     learn.setColour (juce::TextButton::buttonColourId,
@@ -188,6 +222,8 @@ void OutputRow::resized()
     triggerChannel.setBounds (r.removeFromLeft (fieldW));
     r.removeFromLeft (gap);
     number.setBounds (r.removeFromLeft (fieldW));
+    r.removeFromLeft (gap);
+    op.setBounds (r.removeFromLeft (opW));
     r.removeFromLeft (gap);
     value.setBounds (r.removeFromLeft (fieldW));
     r.removeFromLeft (gap);
@@ -297,14 +333,15 @@ void MidiRouterAudioProcessorEditor::paint (juce::Graphics& g)
 
     auto col = [&] (const juce::String& text, int w)
     {
-        g.drawText (text, x, y, w, h, juce::Justification::centred);
+        g.drawFittedText (text, x, y, w, h, juce::Justification::centred, 2);
         x += w + gap;
     };
 
     col ("Active", OutputRow::activeW);
     col ("Type", OutputRow::typeW);
-    col ("In channel", OutputRow::fieldW);
+    col ("Trigger channel", OutputRow::fieldW);
     col ("Number", OutputRow::fieldW);
+    col ("Op", OutputRow::opW);
     col ("Value", OutputRow::fieldW);
     col ("Out channel", OutputRow::fieldW);
 }
