@@ -67,7 +67,6 @@ private:
     NumberField triggerChannel { 0, 16, true, 0 };
     NumberField number { 0, 127, false, 0 };
     NumberField value { -1, 127, true, -1 };
-    NumberField outChannel { 1, 16, false, 0 };
     juce::TextButton learn { "Learn" };
 };
 
@@ -83,16 +82,12 @@ public:
 
 private:
     void timerCallback() override;
-    void rebuildRows();
-    void updateWindowSize();
     static juce::String describeMidi (uint32_t packed);
 
     MidiRouterAudioProcessor& processor;
     midirouter::RouterSettings& settings;
 
     juce::Label title { {}, "MIDI Router" };
-    juce::Label outputsLabel { {}, "Outputs" };
-    juce::ComboBox outputCount;
     juce::ToggleButton resetOnSwitch { "Reset pitch bend / mod wheel on switch" };
     juce::TextButton panic { "Panic" };
     juce::TooltipWindow tooltipWindow { this, 500 };
@@ -100,7 +95,6 @@ private:
     juce::Label version;
 
     juce::OwnedArray<OutputRow> rows;
-    int shownOutputs = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiRouterAudioProcessorEditor)
 };

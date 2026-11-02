@@ -42,14 +42,8 @@ namespace midirouter
         template <class Sink>
         void panic (int offset, Sink&& sink)
         {
-            uint32_t sent = 0;
-
-            for (int o = 0; o < settings.getNumOutputs(); ++o)
+            for (int ch = 0; ch < numOutputs; ++ch)
             {
-                const auto ch = settings.getOutput (o).outChannel - 1;
-                if (sent & (1u << ch))
-                    continue;
-                sent |= 1u << ch;
                 sink (offset, (uint8_t) (0xB0 | ch), (uint8_t) 123, (uint8_t) 0); // all notes off
                 sink (offset, (uint8_t) (0xB0 | ch), (uint8_t) 64, (uint8_t) 0);  // sustain off
             }
@@ -60,7 +54,6 @@ namespace midirouter
         template <class Sink>
         void process (const Message& m, Sink&& sink)
         {
-            const int numOutputs = settings.getNumOutputs();
             const int type = m.status & 0xF0;
             const int ch = m.status & 0x0F;
             int active = settings.getActiveOutput();
@@ -135,14 +128,14 @@ namespace midirouter
                 if (switchTo >= 0 && switchTo != active)
                 {
                     if (settings.getResetOnSwitch())
-                        resetControllers (m.offset, active, switchTo, sink);
+                        resetControllers (m.offset, active, sink);
 
                     settings.setActiveOutput (switchTo);
                 }
                 return;
             }
 
-            auto channelOf = [this] (int output) { return (uint8_t) (settings.getOutput (output).outChannel - 1); };
+            auto channelOf = [] (int output) { return (uint8_t) output; }; // output N sends on channel N
 
             if (isNoteOn)
             {
@@ -168,16 +161,10 @@ namespace midirouter
                 else
                 {
                     // Sustain up: active output plus any output still sustaining.
-                    uint32_t sent = 0;
-                    for (int o = 0; o < maxOutputs; ++o)
+                    for (int o = 0; o < numOutputs; ++o)
                     {
                         if (sustaining[(size_t) o] || o == active)
-                        {
-                            const auto oc = channelOf (o);
-                            if (! (sent & (1u << oc)))
-                                sink (m.offset, (uint8_t) (0xB0 | oc), (uint8_t) 64, m.data2);
-                            sent |= 1u << oc;
-                        }
+                            sink (m.offset, (uint8_t) (0xB0 | channelOf (o)), (uint8_t) 64, m.data2);
                         sustaining[(size_t) o] = false;
                     }
                 }
@@ -207,19 +194,14 @@ namespace midirouter
 
         /** Centre pitch bend and zero the mod wheel on the instrument being left. */
         template <class Sink>
-        void resetControllers (int offset, int from, int to, Sink& sink)
+        void resetControllers (int offset, int from, Sink& sink)
         {
-            const auto fromCh = settings.getOutput (from).outChannel - 1;
-
-            if (fromCh == settings.getOutput (to).outChannel - 1)
-                return;
-
-            sink (offset, (uint8_t) (0xE0 | fromCh), (uint8_t) 0, (uint8_t) 64); // pitch bend centre
-            sink (offset, (uint8_t) (0xB0 | fromCh), (uint8_t) 1, (uint8_t) 0);  // mod wheel 0
+            sink (offset, (uint8_t) (0xE0 | from), (uint8_t) 0, (uint8_t) 64); // pitch bend centre
+            sink (offset, (uint8_t) (0xB0 | from), (uint8_t) 1, (uint8_t) 0);  // mod wheel 0
         }
 
         RouterSettings& settings;
         std::array<uint8_t, 16 * 128> noteOutput {}; // [inChannel*128 + note] -> output+1 (0 = not held)
-        std::array<bool, (size_t) maxOutputs> sustaining {};
+        std::array<bool, (size_t) numOutputs> sustaining {};
     };
 }

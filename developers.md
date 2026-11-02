@@ -40,7 +40,7 @@ The UI uses `setActiveOutputFromUI()`, which updates the engine immediately and 
 
 ### State
 
-`getStateInformation` stores the APVTS state plus a `Router` child holding the output count, reset option, and every output's type/channel/number/value/out-channel (all 16, even if fewer are shown). Trigger settings are deliberately *not* host parameters.
+`getStateInformation` stores the APVTS state plus a `Router` child holding the reset option and each of the 16 outputs' type/trigger channel/number/operator/value. Trigger settings are deliberately *not* host parameters.
 
 ### MIDI effect plugin type
 

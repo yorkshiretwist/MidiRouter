@@ -26,7 +26,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MidiRouterAudioProcessor::cr
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
     layout.add (std::make_unique<juce::AudioParameterInt> (
-        juce::ParameterID { "active", 1 }, "Active Output", 1, midirouter::maxOutputs, 1));
+        juce::ParameterID { "active", 1 }, "Active Output", 1, midirouter::numOutputs, 1));
 
     return layout;
 }
@@ -117,10 +117,9 @@ juce::AudioProcessorEditor* MidiRouterAudioProcessor::createEditor()
 juce::ValueTree MidiRouterAudioProcessor::routerStateToTree() const
 {
     juce::ValueTree tree (routerTreeId);
-    tree.setProperty ("numOutputs", settings.getNumOutputs(), nullptr);
     tree.setProperty ("resetOnSwitch", settings.getResetOnSwitch(), nullptr);
 
-    for (int i = 0; i < midirouter::maxOutputs; ++i)
+    for (int i = 0; i < midirouter::numOutputs; ++i)
     {
         const auto c = settings.getOutput (i);
         juce::ValueTree o (outputTreeId);
@@ -129,7 +128,6 @@ juce::ValueTree MidiRouterAudioProcessor::routerStateToTree() const
         o.setProperty ("number", c.number, nullptr);
         o.setProperty ("op", (int) c.op, nullptr);
         o.setProperty ("value", c.value, nullptr);
-        o.setProperty ("outChannel", c.outChannel, nullptr);
         tree.appendChild (o, nullptr);
     }
 
@@ -141,10 +139,9 @@ void MidiRouterAudioProcessor::routerStateFromTree (const juce::ValueTree& tree)
     if (! tree.hasType (routerTreeId))
         return;
 
-    settings.setNumOutputs ((int) tree.getProperty ("numOutputs", midirouter::defaultOutputs));
     settings.setResetOnSwitch ((bool) tree.getProperty ("resetOnSwitch", true));
 
-    for (int i = 0; i < juce::jmin (tree.getNumChildren(), midirouter::maxOutputs); ++i)
+    for (int i = 0; i < juce::jmin (tree.getNumChildren(), midirouter::numOutputs); ++i)
     {
         const auto o = tree.getChild (i);
         midirouter::OutputConfig c = settings.getOutput (i);
@@ -153,7 +150,6 @@ void MidiRouterAudioProcessor::routerStateFromTree (const juce::ValueTree& tree)
         c.number = (int) o.getProperty ("number", c.number);
         c.op = (midirouter::CompareOp) midirouter::clampInt ((int) o.getProperty ("op", (int) c.op), 0, 4);
         c.value = (int) o.getProperty ("value", c.value);
-        c.outChannel = (int) o.getProperty ("outChannel", c.outChannel);
         settings.setOutput (i, c);
     }
 }

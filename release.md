@@ -5,7 +5,7 @@ Thanks for downloading MidiRouter! Grab the file that matches your operating sys
 # What's new in this version
 
 - First release
-- Routes incoming MIDI to one of up to 16 outputs (MIDI channels), switching when a configurable CC (exact, below or above a value), Program Change or Note trigger arrives
+- Routes incoming MIDI to one of 16 outputs (output N sends on MIDI channel N), switching when a configurable CC (exact, below or above a value), Program Change or Note trigger arrives
 - MIDI Learn for every trigger, typed-entry fields, and a host-automatable "Active Output" parameter
 - Note-off and sustain tracking so notes and held pedals are never left stuck on an instrument you have switched away from
 - Panic button, optional pitch bend / mod wheel reset on switch, and a last-received-MIDI display

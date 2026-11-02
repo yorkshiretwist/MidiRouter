@@ -1,12 +1,12 @@
 # MidiRouter
 
-A cross-platform **MIDI effect plugin** (VST3, CLAP, and AU on macOS) that routes incoming MIDI to one of up to 16 outputs — each output is a MIDI channel — and switches the active output when a trigger message you choose arrives.
+A cross-platform **MIDI effect plugin** (VST3, CLAP, and AU on macOS) that routes incoming MIDI to one of 16 outputs — output N is MIDI channel N — and switches the active output when a trigger message you choose arrives.
 
 It was built for a live rig where a MIDI controller's buttons send fixed messages and one of several instruments (for example eight plugins in Carla, each behind a *MIDI Channel Filter*) must respond at a time. Triggers are configurable, so MidiRouter can match whatever your controller sends.
 
 ## Features
 
-- Up to **16 outputs** (default 8); output N sends on MIDI channel N by default, and each output's channel can be changed
+- **16 outputs**; output N always sends on MIDI channel N, so a per-instrument *MIDI Channel Filter* set to channel N picks it up
 - **Triggers** per output: **None**, **CC**, **Program Change** or **Note**, with a trigger channel (or *Any*), a number and, for CC, a value (or *Any*) with a comparison operator (`=`, `<=`, `>=`, `<`, `>`)
 - **MIDI Learn** on every output — press the button on your controller and the trigger is filled in for you
 - Trigger messages are **swallowed**, so they never reach your instruments

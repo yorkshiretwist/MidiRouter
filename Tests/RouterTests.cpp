@@ -61,17 +61,15 @@ namespace
     using V = std::vector<Out>;
 }
 
-TEST_CASE ("defaults: eight outputs, no triggers, output N on channel N, reset on switch")
+TEST_CASE ("defaults: no triggers, first output active, reset on switch")
 {
     RouterSettings s;
-    CHECK (s.getNumOutputs() == 8);
     CHECK (s.getActiveOutput() == 0);
     CHECK (s.getResetOnSwitch());
     for (int i = 0; i < 16; ++i)
     {
         auto c = s.getOutput (i);
         CHECK (c.type == TriggerType::none);
-        CHECK (c.outChannel == i + 1);
     }
 }
 
@@ -152,17 +150,16 @@ TEST_CASE ("settings clamp out-of-range values")
 {
     RouterSettings s;
     OutputConfig c;
-    c.triggerChannel = 99; c.number = -5; c.value = 500; c.outChannel = 0;
+    c.triggerChannel = 99; c.number = -5; c.value = 500;
     s.setOutput (0, c);
     auto r = s.getOutput (0);
     CHECK (r.triggerChannel == 16);
     CHECK (r.number == 0);
     CHECK (r.value == 127);
-    CHECK (r.outChannel == 1);
-    s.setNumOutputs (99);
-    CHECK (s.getNumOutputs() == 16);
-    s.setNumOutputs (0);
-    CHECK (s.getNumOutputs() == 1);
+    s.setActiveOutput (99);
+    CHECK (s.getActiveOutput() == 15);
+    s.setActiveOutput (-3);
+    CHECK (s.getActiveOutput() == 0);
 }
 
 TEST_CASE ("trigger CC switches output and is swallowed")
@@ -251,22 +248,17 @@ TEST_CASE ("lowest-numbered matching output wins")
     CHECK (h.settings.getActiveOutput() == 6);
 }
 
-TEST_CASE ("triggers on outputs beyond numOutputs are ignored")
+TEST_CASE ("there are 16 outputs and output N sends on channel N")
 {
     Harness h;
-    h.settings.setNumOutputs (2);
-    CHECK (h.send (0xB0, 25, 127) == V { { 0, 0xB0, 25, 127 } });
-    CHECK (h.settings.getActiveOutput() == 0);
-}
-
-TEST_CASE ("per-output MIDI channel is used")
-{
-    Harness h;
-    auto c = h.settings.getOutput (0);
-    c.outChannel = 10;
-    h.settings.setOutput (0, c);
-    CHECK (h.send (0x90, 60, 100) == V { { 0, 0x99, 60, 100 } });
-    CHECK (h.send (0xE0, 1, 2) == V { { 0, 0xE9, 1, 2 } });
+    for (int i = 0; i < 16; ++i)
+    {
+        h.configure (i, TriggerType::cc, 0, 100 + i, 127);
+        CHECK (h.send (0xB0, 100 + i, 127).empty());
+        CHECK (h.settings.getActiveOutput() == i);
+        CHECK (h.send (0x90, 60, 100) == V { { 0, 0x90 | i, 60, 100 } });
+        CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80 | i, 60, 0 } });
+    }
 }
 
 TEST_CASE ("other channel messages go to the active output with offset preserved")
@@ -325,17 +317,6 @@ TEST_CASE ("held notes are tracked per input channel")
 
     CHECK (h.send (0x81, 60, 0) == V { { 0, 0x81, 60, 0 } });
     CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 } });
-}
-
-TEST_CASE ("note-off is sent on the channel of the output the note-on went to")
-{
-    Harness h;
-    auto c = h.settings.getOutput (0);
-    c.outChannel = 12;
-    h.settings.setOutput (0, c);
-    h.send (0x90, 60, 100);
-    h.send (0xB0, 21, 127);
-    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x8B, 60, 0 } });
 }
 
 TEST_CASE ("sustain down goes to the active output only")
@@ -449,27 +430,22 @@ TEST_CASE ("switching resets pitch bend and mod wheel on the output being left")
     CHECK (h.send (0xB0, 22, 127).empty());
 }
 
-TEST_CASE ("reset on switch can be disabled and skips shared channels")
+TEST_CASE ("reset on switch can be disabled")
 {
     Harness h;
     CHECK (h.send (0xB0, 22, 127).empty());
-
-    h.settings.setResetOnSwitch (true);
-    auto c = h.settings.getOutput (3);
-    c.outChannel = 3; // output 3 shares channel 3 with output 2
-    h.settings.setOutput (3, c);
-    CHECK (h.send (0xB0, 23, 127).empty());
 }
 
-TEST_CASE ("panic sends all-notes-off and sustain-off once per distinct channel")
+TEST_CASE ("panic sends all-notes-off and sustain-off on every channel")
 {
     Harness h;
-    h.settings.setNumOutputs (3);
-    auto c = h.settings.getOutput (2);
-    c.outChannel = 1; // shares a channel with output 0
-    h.settings.setOutput (2, c);
-
-    CHECK (h.panic() == V { { 0, 0xB0, 123, 0 }, { 0, 0xB0, 64, 0 }, { 0, 0xB1, 123, 0 }, { 0, 0xB1, 64, 0 } });
+    V expected;
+    for (int ch = 0; ch < 16; ++ch)
+    {
+        expected.push_back ({ 0, 0xB0 | ch, 123, 0 });
+        expected.push_back ({ 0, 0xB0 | ch, 64, 0 });
+    }
+    CHECK (h.panic() == expected);
 }
 
 TEST_CASE ("panic clears note and sustain tracking")
@@ -487,12 +463,11 @@ TEST_CASE ("panic clears note and sustain tracking")
 TEST_CASE ("beginBlock honours a panic request exactly once")
 {
     Harness h;
-    h.settings.setNumOutputs (1);
     h.settings.requestPanic();
     std::vector<Out> out;
     auto sink = [&] (int o, uint8_t s, uint8_t a, uint8_t b) { out.push_back ({ o, s, a, b }); };
     h.router.beginBlock (sink);
-    CHECK (out.size() == 2);
+    CHECK (out.size() == 32);
     out.clear();
     h.router.beginBlock (sink);
     CHECK (out.empty());

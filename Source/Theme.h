@@ -26,13 +26,13 @@ namespace Theme
         inline const juce::Colour titleTextColour { juce::Colours::white };
         constexpr float titleFontSizePx = 18.0f;
 
-        constexpr int widthPx    = 660;
+        constexpr int widthPx    = 600;
         constexpr int marginPx   = 16;
         constexpr int gapPx      = 8;
     }
 
     //==============================================================================
-    // The toolbar above the output rows (output count, reset option, Panic)
+    // The toolbar above the output rows (reset option, Panic)
     namespace TopBar
     {
         constexpr int heightPx = 34;

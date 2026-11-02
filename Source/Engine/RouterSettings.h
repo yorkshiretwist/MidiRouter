@@ -7,8 +7,8 @@
 
 namespace midirouter
 {
-    constexpr int maxOutputs = 16;
-    constexpr int defaultOutputs = 8;
+    /** The plugin has a fixed 16 outputs; output N (1-16) sends on MIDI channel N. */
+    constexpr int numOutputs = 16;
 
     /** none = the output has no trigger (it can still be selected from the UI or the host). */
     enum class TriggerType : int { none = 0, cc = 1, pc = 2, note = 3 };
@@ -24,7 +24,6 @@ namespace midirouter
         int number = 0;         // 0-127
         CompareOp op = CompareOp::eq; // CC only
         int value = 127;        // CC only: -1 = any (op ignored), 0-127
-        int outChannel = 1;     // 1-16
     };
 
     inline int clampInt (int v, int lo, int hi) { return std::min (std::max (v, lo), hi); }
@@ -42,58 +41,50 @@ namespace midirouter
 
         void resetToDefaults()
         {
-            numOutputs.store (defaultOutputs);
             activeOutput.store (0);
             resetOnSwitch.store (true);
             learnTarget.store (-1);
             panicRequested.store (false);
             lastMidi.store (0);
 
-            for (int i = 0; i < maxOutputs; ++i)
+            for (int i = 0; i < numOutputs; ++i)
             {
-                OutputConfig c;
-                c.outChannel = i + 1;
-                setOutput (i, c);
+                setOutput (i, OutputConfig {});
             }
         }
 
         OutputConfig getOutput (int i) const
         {
-            const auto& o = outputs[(size_t) clampInt (i, 0, maxOutputs - 1)];
+            const auto& o = outputs[(size_t) clampInt (i, 0, numOutputs - 1)];
             OutputConfig c;
             c.type = (TriggerType) clampInt (o.type.load(), 0, 3);
             c.op = (CompareOp) clampInt (o.op.load(), 0, 4);
             c.triggerChannel = o.triggerChannel.load();
             c.number = o.number.load();
             c.value = o.value.load();
-            c.outChannel = o.outChannel.load();
             return c;
         }
 
         /** Stores the config, clamping every field to its valid range. */
         void setOutput (int i, const OutputConfig& c)
         {
-            auto& o = outputs[(size_t) clampInt (i, 0, maxOutputs - 1)];
+            auto& o = outputs[(size_t) clampInt (i, 0, numOutputs - 1)];
             o.type.store ((int) c.type);
             o.triggerChannel.store (clampInt (c.triggerChannel, 0, 16));
             o.number.store (clampInt (c.number, 0, 127));
             o.op.store ((int) c.op);
             o.value.store (clampInt (c.value, -1, 127));
-            o.outChannel.store (clampInt (c.outChannel, 1, 16));
         }
 
-        int getNumOutputs() const { return clampInt (numOutputs.load(), 1, maxOutputs); }
-        void setNumOutputs (int n) { numOutputs.store (clampInt (n, 1, maxOutputs)); }
-
-        int getActiveOutput() const { return clampInt (activeOutput.load(), 0, getNumOutputs() - 1); }
-        void setActiveOutput (int i) { activeOutput.store (clampInt (i, 0, getNumOutputs() - 1)); }
+        int getActiveOutput() const { return clampInt (activeOutput.load(), 0, numOutputs - 1); }
+        void setActiveOutput (int i) { activeOutput.store (clampInt (i, 0, numOutputs - 1)); }
 
         bool getResetOnSwitch() const { return resetOnSwitch.load(); }
         void setResetOnSwitch (bool b) { resetOnSwitch.store (b); }
 
         /** -1 when not learning, otherwise the output waiting for a message. */
         int getLearnTarget() const { return learnTarget.load(); }
-        void startLearn (int output) { learnTarget.store (clampInt (output, 0, maxOutputs - 1)); }
+        void startLearn (int output) { learnTarget.store (clampInt (output, 0, numOutputs - 1)); }
         void cancelLearn() { learnTarget.store (-1); }
 
         void requestPanic() { panicRequested.store (true); }
@@ -110,11 +101,10 @@ namespace midirouter
     private:
         struct Output
         {
-            std::atomic<int> type { 0 }, triggerChannel { 0 }, number { 0 }, op { 0 }, value { 127 }, outChannel { 1 };
+            std::atomic<int> type { 0 }, triggerChannel { 0 }, number { 0 }, op { 0 }, value { 127 };
         };
 
-        std::array<Output, (size_t) maxOutputs> outputs;
-        std::atomic<int> numOutputs { defaultOutputs };
+        std::array<Output, (size_t) numOutputs> outputs;
         std::atomic<int> activeOutput { 0 };
         std::atomic<bool> resetOnSwitch { true };
         std::atomic<int> learnTarget { -1 };

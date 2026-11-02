@@ -27,16 +27,14 @@ macOS builds are not signed or notarized; allow them under System Settings → P
 
 | Control | What it does |
 |---|---|
-| **Outputs** | How many outputs are in use (1–16). Default 8. |
 | **Reset pitch bend / mod wheel on switch** | When the active output changes, centres the pitch bend and zeroes the mod wheel on the instrument being switched away from, so it isn't left bent or modulated. |
 | **Panic** | Sends *All Notes Off* and *Sustain Off* on every output channel and forgets held notes. |
-| **Active** (circle) | Green on the active output. Click a circle to make that output active. |
+| **Output number and Active** (circle) | There are 16 outputs. The circle is green on the active output; click one to make that output active. Output N sends on MIDI channel N. |
 | **Type** | Trigger kind: **None** (no trigger — the default), **CC**, **PC** (program change) or **Note**. The other fields are greyed out when Type is None. |
 | **Trigger channel** | The MIDI channel the trigger message must arrive on, or **Any**. This is about *listening*; it is not where the output sends. |
 | **Number** | CC number, program number or note number (0–127). |
 | **Op** | CC only: how the received value is compared with **Value** — `=` exactly, `<=` below or equal, `>=` above or equal, `<` below, `>` above. Greyed out when Value is **Any**. |
 | **Value** | CC value to compare against, or **Any** (matches every value, operator ignored). Greyed out for PC and Note. |
-| **Out channel** | The MIDI channel (1–16) this output **sends** its notes and other MIDI on. Defaults to the output number. See [What is Out channel for?](#what-is-out-channel-for) |
 | **Learn** | Captures the next trigger from your controller (see below). |
 | Footer | The last MIDI message received — handy for finding out what a controller button sends. |
 
@@ -44,13 +42,11 @@ All number fields are typed entry. Press **Return** or click away to apply; **Es
 
 **Defaults:** every output starts with Type **None** (no trigger), so nothing switches until you set triggers with **Learn** or by typing them. Output N sends on channel N, and *Reset pitch bend / mod wheel on switch* is ticked.
 
-### What is Out channel for?
+### Which MIDI channel does each output use?
 
-MIDI has no separate cables inside a single plugin, so MidiRouter has one MIDI output and tells the instruments apart by **MIDI channel**. *Out channel* is the channel an output stamps on everything it sends (notes, pitch bend, sustain and so on). Whatever sits after MidiRouter — in Carla, a *MIDI Channel Filter* in front of each instrument — listens for one channel, so **the filter's channel must match the output's Out channel**.
+MIDI has no separate cables inside a single plugin, so MidiRouter has one MIDI output and tells the instruments apart by **MIDI channel**. Output N always sends on channel N (output 1 → channel 1 … output 16 → channel 16), stamped on everything it sends: notes, pitch bend, sustain and so on. Whatever sits after MidiRouter — in Carla, a *MIDI Channel Filter* in front of each instrument — listens for one channel, so **set the filter in front of instrument N to channel N**.
 
-Leave the defaults (output 1 → channel 1, output 2 → channel 2 …) unless an instrument is already tied to a particular channel, or you want two outputs to feed the same instrument by giving them the same channel.
-
-Don't confuse it with *Trigger channel*, which only says which incoming channel a trigger message must arrive on.
+Don't confuse this with *Trigger channel*, which only says which incoming channel a trigger message must arrive on.
 
 ## How routing works
 
@@ -62,7 +58,7 @@ A message **switches** to an output when it belongs to that output's trigger and
 - **PC** — always
 - **Note** — it is a note-on with velocity above 0 (velocity is otherwise ignored)
 
-If several outputs match, the **lowest-numbered output wins**. Outputs beyond the *Outputs* count, and outputs whose Type is *None*, are ignored.
+If several outputs match, the **lowest-numbered output wins**. Outputs whose Type is *None* are ignored.
 
 **Notes.** A note-on goes to the active output. Its note-off (and any polyphonic aftertouch) goes to **the output the note-on went to**, even if you have switched since, so nothing sticks. If MidiRouter never saw the note-on, the note-off goes to the active output.
 
@@ -86,7 +82,7 @@ Click **Cancel** (or click Learn on another output) to abandon learning. Learn o
 
 ## Saving and automation
 
-- Trigger settings, channels, the output count and the reset option are stored in the plugin state, so they are saved and restored with your project or preset.
+- Trigger settings and the reset option are stored in the plugin state, so they are saved and restored with your project or preset.
 - The **Active Output** (1–16) is a host parameter and can be automated or controlled from your host. Trigger settings are not parameters.
 
 ## Carla setup guide
@@ -97,19 +93,19 @@ This is the rig MidiRouter was designed for: one MIDI controller, eight instrume
 
 1. **Add the instruments.** In Carla, add your eight instrument plugins.
 2. **Add a MIDI Channel Filter in front of each.** In Carla use *Add Plugin → Internal → MIDI Channel Filter*. Add one per instrument.
-3. **Set each filter to a different channel.** Filter 1 → channel 1, filter 2 → channel 2, and so on, matching the MidiRouter **Out channel** values (see [What is Out channel for?](#what-is-out-channel-for)). Each filter passes only its channel to its instrument.
+3. **Set each filter to a different channel.** Filter 1 → channel 1, filter 2 → channel 2, and so on, matching the output numbers in MidiRouter (output N sends on channel N). Each filter passes only its channel to its instrument.
 4. **Add MidiRouter.** *Add Plugin → Plugin* (rescan if needed) and choose MidiRouter (VST3 or CLAP). It appears with a MIDI input and a MIDI output.
 5. **Open the Patchbay tab and wire it up:**
    - Your controller's JACK/ALSA MIDI port → **MidiRouter MIDI in**
    - **MidiRouter MIDI out** → the **MIDI in of every MIDI Channel Filter** (one output can feed all eight)
    - Each filter's MIDI out → its instrument's MIDI in
    - Instrument audio outputs → your audio outputs as usual
-6. **Set up triggers.** Set *Outputs* to 8 and use **Learn** on each row (outputs start with no trigger), pressing the button on your controller that should select that instrument. Or type the CC/PC/note values if you know them.
+6. **Set up triggers.** Use **Learn** on the first eight rows (outputs start with no trigger), pressing the button on your controller that should select that instrument. Or type the CC/PC/note values if you know them.
 7. **Test.** Play notes: they should sound on the instrument for output 1. Press a trigger button: the green circle moves, and new notes go to the new instrument while any held notes finish on the old one.
 
 Tips:
 
-- Keep the *Out channel* values in MidiRouter and the filter channels in Carla identical. If you have fewer than 8 instruments, lower *Outputs*.
+- The filter channel in Carla must equal the MidiRouter output number. If you have fewer than 16 instruments, just leave the extra outputs on Type *None*.
 - Make sure nothing else feeds the instruments or filters directly with the raw controller, or triggers will also reach the instruments.
 - Save the Carla project: MidiRouter's settings are stored inside it.
 

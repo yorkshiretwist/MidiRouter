@@ -79,7 +79,7 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     : processor (p), settings (p.getSettings()), index (i)
 {
     addAndMakeVisible (active);
-    active.setTooltip ("Make output " + juce::String (index + 1) + " the active output");
+    active.setTooltip ("Make output " + juce::String (index + 1) + " the active output. It sends on MIDI channel " + juce::String (index + 1));
     active.onClick = [this] { processor.setActiveOutputFromUI (index); };
 
     auto styleCombo = [] (juce::ComboBox& box)
@@ -95,7 +95,7 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     type.addItem ("CC", 2);
     type.addItem ("PC", 3);
     type.addItem ("Note", 4);
-    type.setTooltip ("What kind of message selects this output. None = no trigger (select it with the circle instead)");
+    type.setTooltip ("What kind of message selects this output. None = no trigger (select it with the circle instead); editing any trigger field changes None to CC");
     styleCombo (type);
     type.onChange = [this]
     {
@@ -116,6 +116,8 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     {
         auto c = settings.getOutput (index);
         c.op = (midirouter::CompareOp) (op.getSelectedId() - 1);
+        if (c.type == midirouter::TriggerType::none)
+            c.type = midirouter::TriggerType::cc;
         settings.setOutput (index, c);
     };
     addAndMakeVisible (op);
@@ -127,7 +129,12 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
         f.setter = [this, member] (int v)
         {
             auto c = settings.getOutput (index);
+            if (c.*member == v)
+                return;
+
             c.*member = v;
+            if (c.type == midirouter::TriggerType::none)
+                c.type = midirouter::TriggerType::cc; // editing a trigger field turns a "None" output into a CC trigger
             settings.setOutput (index, c);
         };
         addAndMakeVisible (f);
@@ -136,7 +143,6 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     bind (triggerChannel, &midirouter::OutputConfig::triggerChannel, "The channel the trigger message must arrive on (Any, or 1-16)");
     bind (number, &midirouter::OutputConfig::number, "CC number / program number / note number (0-127)");
     bind (value, &midirouter::OutputConfig::value, "CC value to compare against (Any, or 0-127). Any matches every value. Not used for PC and Note");
-    bind (outChannel, &midirouter::OutputConfig::outChannel, "The MIDI channel this output sends on (1-16). Set the MIDI Channel Filter in front of the matching instrument to the same channel");
 
     learn.setClickingTogglesState (false);
     learn.setColour (juce::TextButton::buttonColourId, Theme::LearnButton::backgroundColour);
@@ -167,23 +173,23 @@ void OutputRow::refresh()
     triggerChannel.refresh();
     number.refresh();
     value.refresh();
-    outChannel.refresh();
 
     if (op.getSelectedId() != (int) c.op + 1)
         op.setSelectedId ((int) c.op + 1, juce::dontSendNotification);
 
-    // Which fields matter depends on the trigger type.
-    auto show = [] (juce::Component& comp, bool enabled)
+    // Fields stay editable on a "None" output (editing one turns it into a CC trigger),
+    // but are dimmed; fields that don't apply to PC/Note triggers are disabled.
+    auto show = [] (juce::Component& comp, bool enabled, bool dimmed)
     {
         comp.setEnabled (enabled);
-        comp.setAlpha (enabled ? 1.0f : 0.4f);
+        comp.setAlpha (! enabled ? 0.4f : dimmed ? 0.6f : 1.0f);
     };
-    const bool hasTrigger = c.type != midirouter::TriggerType::none;
+    const bool none = c.type == midirouter::TriggerType::none;
     const bool isCC = c.type == midirouter::TriggerType::cc;
-    show (triggerChannel, hasTrigger);
-    show (number, hasTrigger);
-    show (op, isCC && c.value >= 0); // "Any" ignores the operator
-    show (value, isCC);
+    show (triggerChannel, true, none);
+    show (number, true, none);
+    show (op, (none || isCC) && c.value >= 0, none); // "Any" ignores the operator
+    show (value, none || isCC, none);
 
     learn.setButtonText (learning ? "Cancel" : "Learn");
     learn.setColour (juce::TextButton::buttonColourId,
@@ -227,8 +233,6 @@ void OutputRow::resized()
     r.removeFromLeft (gap);
     value.setBounds (r.removeFromLeft (fieldW));
     r.removeFromLeft (gap);
-    outChannel.setBounds (r.removeFromLeft (fieldW));
-    r.removeFromLeft (gap);
     learn.setBounds (r.removeFromLeft (learnW));
 }
 
@@ -239,25 +243,6 @@ MidiRouterAudioProcessorEditor::MidiRouterAudioProcessorEditor (MidiRouterAudioP
     title.setFont (juce::FontOptions (Theme::Window::titleFontSizePx, juce::Font::bold));
     title.setColour (juce::Label::textColourId, Theme::Window::titleTextColour);
     addAndMakeVisible (title);
-
-    outputsLabel.setColour (juce::Label::textColourId, Theme::TopBar::labelColour);
-    outputsLabel.setJustificationType (juce::Justification::centredRight);
-    addAndMakeVisible (outputsLabel);
-
-    for (int i = 1; i <= midirouter::maxOutputs; ++i)
-        outputCount.addItem (juce::String (i), i);
-    outputCount.setSelectedId (settings.getNumOutputs(), juce::dontSendNotification);
-    outputCount.setColour (juce::ComboBox::backgroundColourId, Theme::Field::backgroundColour);
-    outputCount.setColour (juce::ComboBox::outlineColourId, Theme::Field::borderColour);
-    outputCount.setColour (juce::ComboBox::textColourId, Theme::Field::textColour);
-    outputCount.setColour (juce::ComboBox::arrowColourId, Theme::Field::textColour);
-    outputCount.onChange = [this]
-    {
-        settings.setNumOutputs (outputCount.getSelectedId());
-        processor.setActiveOutputFromUI (settings.getActiveOutput());
-        updateWindowSize();
-    };
-    addAndMakeVisible (outputCount);
 
     resetOnSwitch.setToggleState (settings.getResetOnSwitch(), juce::dontSendNotification);
     resetOnSwitch.setColour (juce::ToggleButton::textColourId, Theme::SecondaryControl::textColour);
@@ -283,38 +268,20 @@ MidiRouterAudioProcessorEditor::MidiRouterAudioProcessorEditor (MidiRouterAudioP
     version.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (version);
 
-    rebuildRows();
+    for (int i = 0; i < midirouter::numOutputs; ++i)
+        addAndMakeVisible (rows.add (new OutputRow (processor, i)));
+
+    using namespace Theme;
+    const int rowsH = midirouter::numOutputs * (Row::heightPx + Row::gapPx);
+    setSize (Window::widthPx,
+             Window::marginPx * 2 + 30 + TopBar::heightPx + ColumnHeader::heightPx + rowsH + Footer::heightPx);
+
     startTimerHz (20);
 }
 
 MidiRouterAudioProcessorEditor::~MidiRouterAudioProcessorEditor()
 {
     stopTimer();
-}
-
-void MidiRouterAudioProcessorEditor::rebuildRows()
-{
-    shownOutputs = settings.getNumOutputs();
-    rows.clear();
-
-    for (int i = 0; i < shownOutputs; ++i)
-        addAndMakeVisible (rows.add (new OutputRow (processor, i)));
-
-    updateWindowSize();
-}
-
-void MidiRouterAudioProcessorEditor::updateWindowSize()
-{
-    if (shownOutputs != settings.getNumOutputs())
-    {
-        rebuildRows(); // calls back into updateWindowSize()
-        return;
-    }
-
-    using namespace Theme;
-    const int rowsH = shownOutputs * (Row::heightPx + Row::gapPx);
-    const int h = Window::marginPx * 2 + 30 + TopBar::heightPx + ColumnHeader::heightPx + rowsH + Footer::heightPx;
-    setSize (Window::widthPx, h);
 }
 
 void MidiRouterAudioProcessorEditor::paint (juce::Graphics& g)
@@ -343,7 +310,6 @@ void MidiRouterAudioProcessorEditor::paint (juce::Graphics& g)
     col ("Number", OutputRow::fieldW);
     col ("Op", OutputRow::opW);
     col ("Value", OutputRow::fieldW);
-    col ("Out channel", OutputRow::fieldW);
 }
 
 void MidiRouterAudioProcessorEditor::resized()
@@ -356,9 +322,6 @@ void MidiRouterAudioProcessorEditor::resized()
     auto bar = r.removeFromTop (TopBar::heightPx).reduced (0, 4);
     panic.setBounds (bar.removeFromRight (80));
     bar.removeFromRight (Window::gapPx);
-    outputsLabel.setBounds (bar.removeFromLeft (60));
-    outputCount.setBounds (bar.removeFromLeft (60));
-    bar.removeFromLeft (Window::gapPx * 2);
     resetOnSwitch.setBounds (bar);
 
     r.removeFromTop (ColumnHeader::heightPx);
@@ -401,15 +364,6 @@ juce::String MidiRouterAudioProcessorEditor::describeMidi (uint32_t packed)
 
 void MidiRouterAudioProcessorEditor::timerCallback()
 {
-    if (shownOutputs != settings.getNumOutputs())
-    {
-        outputCount.setSelectedId (settings.getNumOutputs(), juce::dontSendNotification);
-        rebuildRows();
-    }
-
-    if (outputCount.getSelectedId() != settings.getNumOutputs())
-        outputCount.setSelectedId (settings.getNumOutputs(), juce::dontSendNotification);
-
     if (resetOnSwitch.getToggleState() != settings.getResetOnSwitch())
         resetOnSwitch.setToggleState (settings.getResetOnSwitch(), juce::dontSendNotification);
 
