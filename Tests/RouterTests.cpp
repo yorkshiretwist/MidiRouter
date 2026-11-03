@@ -25,8 +25,8 @@ namespace
         {
             settings.setResetOnSwitch (false); // most tests don't want the extra reset messages
 
-            // The plugin ships with no triggers; most tests use the old JSFX layout:
-            // output N listens for CC 19+N = 127 on any channel.
+            // The plugin ships with no triggers; most tests give
+            // output N the trigger CC 19+N = 127 on any channel.
             for (int i = 0; i < 8; ++i)
                 configure (i, TriggerType::cc, 0, 20 + i, 127);
         }

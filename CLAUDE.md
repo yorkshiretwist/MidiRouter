@@ -6,8 +6,7 @@ Build a cross-platform MIDI effect plugin that routes incoming MIDI to one of
 several outputs (MIDI channels), switching the active output when a
 configurable trigger message (CC, Program Change or Note) is received.
 
-It replaces a working JSFX prototype (`reference/cc-router-8.jsfx`, if present)
-used in the user's live rig: Carla (JACK) on Linux Mint hosting 8 instrument
+It is used in the user's live rig: Carla (JACK) on Linux Mint hosting 8 instrument
 plugins, with a "MIDI Channel Filter" in front of each instrument. Buttons on
 the user's MIDI controller send fixed messages that cannot be changed, so
 triggers must be configurable to match whatever the controller sends.
@@ -38,8 +37,6 @@ ask the user.
   VST3/AU effects differently.
 
 ## Routing behaviour (specification)
-
-The JSFX prototype implements this exactly; treat it as the reference.
 
 ### Outputs
 - 8 outputs (see open decisions). Output N sends on MIDI channel N by default.
