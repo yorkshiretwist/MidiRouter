@@ -482,3 +482,138 @@ TEST_CASE ("last received MIDI is recorded, system messages excluded")
     h.send (0xF8, 0, 0);
     CHECK ((h.settings.getLastMidi() & 0xFFFFFF) == ((0xB2u << 16) | (10u << 8) | 20u));
 }
+
+TEST_CASE ("always-on: default is none")
+{
+    Harness h;
+    CHECK (h.settings.getAlwaysOn() == -1);
+    h.settings.setAlwaysOn (99);
+    CHECK (h.settings.getAlwaysOn() == 15);
+    h.settings.setAlwaysOn (-5);
+    CHECK (h.settings.getAlwaysOn() == -1);
+}
+
+TEST_CASE ("always-on: its trigger has no effect and is not swallowed")
+{
+    Harness h;
+    h.settings.setAlwaysOn (5); // trigger CC 25 = 127
+    CHECK (h.settings.getActiveOutput() == 0);
+
+    // Not a trigger any more: no switch, and it is routed like any other CC (to active + always-on).
+    CHECK (h.send (0xB0, 25, 127) == V { { 0, 0xB0, 25, 127 }, { 0, 0xB5, 25, 127 } });
+    CHECK (h.settings.getActiveOutput() == 0);
+
+    // Other triggers still work.
+    CHECK (h.send (0xB0, 22, 127).empty());
+    CHECK (h.settings.getActiveOutput() == 2);
+}
+
+TEST_CASE ("always-on: a lower output with the same trigger wins now that it is the only match")
+{
+    Harness h;
+    h.configure (6, TriggerType::cc, 0, 21, 127); // same as output 1
+    h.settings.setAlwaysOn (1);
+    h.send (0xB0, 21, 127);
+    CHECK (h.settings.getActiveOutput() == 6);
+}
+
+TEST_CASE ("always-on: every routed message goes to the active and the always-on output")
+{
+    Harness h;
+    h.settings.setAlwaysOn (7);
+    CHECK (h.send (0x90, 60, 100, 3) == V { { 3, 0x90, 60, 100 }, { 3, 0x97, 60, 100 } });
+    CHECK (h.send (0xE0, 1, 2) == V { { 0, 0xE0, 1, 2 }, { 0, 0xE7, 1, 2 } });
+    CHECK (h.send (0xD0, 9) == V { { 0, 0xD0, 9, 0 }, { 0, 0xD7, 9, 0 } });
+    CHECK (h.send (0xC0, 4) == V { { 0, 0xC0, 4, 0 }, { 0, 0xC7, 4, 0 } });
+    CHECK (h.send (0xB1, 1, 50) == V { { 0, 0xB0, 1, 50 }, { 0, 0xB7, 1, 50 } });
+}
+
+TEST_CASE ("always-on: sent once when it is also the active output")
+{
+    Harness h;
+    h.settings.setAlwaysOn (3);
+    h.settings.setActiveOutput (3);
+    CHECK (h.send (0x90, 60, 100) == V { { 0, 0x93, 60, 100 } });
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x83, 60, 0 } });
+    CHECK (h.send (0xB0, 64, 127) == V { { 0, 0xB3, 64, 127 } });
+    CHECK (h.send (0xB0, 64, 0) == V { { 0, 0xB3, 64, 0 } });
+}
+
+TEST_CASE ("always-on: note-offs follow both note-ons, even after the active output changes")
+{
+    Harness h;
+    h.settings.setAlwaysOn (7);
+    h.send (0x90, 60, 100);
+    h.send (0xB0, 22, 127); // active -> 2
+    CHECK (h.send (0xA0, 60, 30) == V { { 0, 0xA0, 60, 30 }, { 0, 0xA7, 60, 30 } });
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 }, { 0, 0x87, 60, 0 } });
+
+    // Record cleared: an unknown note-off goes to active + always-on.
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x82, 60, 0 }, { 0, 0x87, 60, 0 } });
+}
+
+TEST_CASE ("always-on: a note started before always-on was set does not get a stray off")
+{
+    Harness h;
+    h.send (0x90, 60, 100);
+    h.settings.setAlwaysOn (7);
+    CHECK (h.send (0x90, 60, 0) == V { { 0, 0x90, 60, 0 } });
+}
+
+TEST_CASE ("always-on: a note started with always-on still ends there if it is cleared")
+{
+    Harness h;
+    h.settings.setAlwaysOn (7);
+    h.send (0x90, 60, 100);
+    h.settings.setAlwaysOn (-1);
+    CHECK (h.send (0x80, 60, 0) == V { { 0, 0x80, 60, 0 }, { 0, 0x87, 60, 0 } });
+}
+
+TEST_CASE ("always-on: sustain goes to both and is released on both")
+{
+    Harness h;
+    h.settings.setAlwaysOn (7);
+    CHECK (h.send (0xB0, 64, 127) == V { { 0, 0xB0, 64, 127 }, { 0, 0xB7, 64, 127 } });
+    h.send (0xB0, 22, 127); // active -> 2
+    CHECK (h.send (0xB0, 64, 0) == V { { 0, 0xB0, 64, 0 }, { 0, 0xB2, 64, 0 }, { 0, 0xB7, 64, 0 } });
+}
+
+TEST_CASE ("always-on: switching does not reset controllers on the always-on output")
+{
+    Harness h;
+    h.settings.setResetOnSwitch (true);
+    h.settings.setAlwaysOn (0);
+    CHECK (h.send (0xB0, 22, 127).empty()); // leaving output 0, which is always-on
+    CHECK (h.settings.getActiveOutput() == 2);
+
+    CHECK (h.send (0xB0, 21, 127) == V { { 0, 0xE2, 0, 64 }, { 0, 0xB2, 1, 0 } });
+}
+
+TEST_CASE ("always-on: learn cannot be armed on it, and selecting it cancels learn")
+{
+    Harness h;
+    h.settings.setAlwaysOn (4);
+    h.settings.startLearn (4);
+    CHECK (h.settings.getLearnTarget() == -1);
+
+    h.settings.startLearn (3);
+    h.settings.setAlwaysOn (3);
+    CHECK (h.settings.getLearnTarget() == -1);
+
+    h.settings.startLearn (2);
+    h.settings.setAlwaysOn (3);
+    CHECK (h.settings.getLearnTarget() == 2);
+}
+
+TEST_CASE ("always-on: trigger settings are kept")
+{
+    Harness h;
+    const auto before = h.settings.getOutput (5);
+    h.settings.setAlwaysOn (5);
+    h.settings.setAlwaysOn (-1);
+    const auto after = h.settings.getOutput (5);
+    CHECK (after.number == before.number);
+    CHECK (after.type == before.type);
+    h.send (0xB0, 25, 127);
+    CHECK (h.settings.getActiveOutput() == 5);
+}

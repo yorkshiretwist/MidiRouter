@@ -31,16 +31,18 @@ private:
     int anyV;
 };
 
-/** Round click-to-select active indicator. */
+/** Round click-to-select radio indicator (used for Active and Always on, in different colours). */
 class ActiveIndicator : public juce::Button
 {
 public:
-    ActiveIndicator() : juce::Button ("active") {}
+    ActiveIndicator (juce::Colour onColour, juce::Colour offColour, juce::Colour hoverColour)
+        : juce::Button ("indicator"), on (onColour), off (offColour), hover (hoverColour) {}
     void setActive (bool b) { if (b != active) { active = b; repaint(); } }
     void paintButton (juce::Graphics&, bool isOver, bool isDown) override;
 
 private:
     bool active = false;
+    juce::Colour on, off, hover;
 };
 
 /** One output's row: number, active indicator, trigger fields, Learn. */
@@ -53,7 +55,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int numberW = 28, activeW = 28, typeW = 76, fieldW = 64, opW = 56, learnW = 104;
+    static constexpr int numberW = 28, activeW = 28, alwaysW = 52, typeW = 76, fieldW = 64, opW = 56, learnW = 104;
 
 private:
     MidiRouterAudioProcessor& processor;
@@ -61,7 +63,8 @@ private:
     const int index;
     bool wasActive = false;
 
-    ActiveIndicator active;
+    ActiveIndicator active { Theme::ActiveDot::activeColour, Theme::ActiveDot::inactiveColour, Theme::ActiveDot::overColour };
+    ActiveIndicator alwaysOn { Theme::AlwaysOnDot::activeColour, Theme::AlwaysOnDot::inactiveColour, Theme::AlwaysOnDot::overColour };
     juce::ComboBox type;
     juce::ComboBox op;
     NumberField triggerChannel { 0, 16, true, 0 };
@@ -94,6 +97,8 @@ private:
     juce::Label lastMidi;
     juce::Label version;
 
+    juce::Viewport viewport;   // scrolls the rows when the window is short; header and footer stay put
+    juce::Component rowsHolder;
     juce::OwnedArray<OutputRow> rows;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiRouterAudioProcessorEditor)

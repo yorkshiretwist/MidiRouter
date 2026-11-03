@@ -46,9 +46,13 @@ The UI uses `setActiveOutputFromUI()`, which updates the engine immediately and 
 
 `CMakeLists.txt` sets `IS_MIDI_EFFECT TRUE` with MIDI input and output and no audio buses (`AU_MAIN_TYPE kAudioUnitType_MIDIProcessor` for AU). Hosts treat MIDI-only effects differently; see the user guide's troubleshooting section.
 
+## Window size
+
+The editor has a fixed width and a resizable height, within the limits in `Theme::Window` (from three visible rows up to all 16; the default shows eight). The 16 `OutputRow`s live in a `juce::Viewport`, so a short window scrolls them while the toolbar, column headings and footer stay fixed. The last size is kept in the processor (`editorHeight`) and stored in the plugin state.
+
 ## Restyling the UI
 
-Every colour, font size, and layout constant lives in `Source/Theme.h`, grouped into namespaces by UI element (`Theme::Window`, `Theme::TopBar`, `Theme::ColumnHeader`, `Theme::Row`, `Theme::ActiveDot`, `Theme::Field`, `Theme::LearnButton`, `Theme::PanicButton`, `Theme::SecondaryControl`, `Theme::Footer`). Edit the value and rebuild; you never need to touch `PluginEditor.cpp` for a pure styling change. The palette deliberately matches TrackDeck's `Theme.h`.
+Every colour, font size, and layout constant lives in `Source/Theme.h`, grouped into namespaces by UI element (`Theme::Window`, `Theme::TopBar`, `Theme::ColumnHeader`, `Theme::Row`, `Theme::ActiveDot`, `Theme::AlwaysOnDot`, `Theme::Field`, `Theme::LearnButton`, `Theme::PanicButton`, `Theme::SecondaryControl`, `Theme::Footer`). Edit the value and rebuild; you never need to touch `PluginEditor.cpp` for a pure styling change. The palette deliberately matches TrackDeck's `Theme.h`.
 
 The version number in the footer is read from JUCE's `JucePlugin_VersionString`, which comes from `project(MidiRouter VERSION ...)` in `CMakeLists.txt`. Bump the version there only.
 

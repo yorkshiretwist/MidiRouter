@@ -30,13 +30,15 @@ macOS builds are not signed or notarized; allow them under System Settings → P
 | **Reset pitch bend / mod wheel on switch** | When the active output changes, centres the pitch bend and zeroes the mod wheel on the instrument being switched away from, so it isn't left bent or modulated. |
 | **Panic** | Sends *All Notes Off* and *Sustain Off* on every output channel and forgets held notes. |
 | **Output number and Active** (circle) | There are 16 outputs. The circle is green on the active output; click one to make that output active. Output N sends on MIDI channel N. |
+| **Always on** (purple circle) | Optional, for at most one output. An always-on output also receives everything sent to the active output (notes, CCs, pitch bend, sustain and so on), so it plays alongside whichever output is active. Its trigger fields and Learn are disabled and its trigger has no effect, but the settings are kept. Click the circle again to turn it off. |
 | **Type** | Trigger kind: **None** (no trigger — the default), **CC**, **PC** (program change) or **Note**. The other fields are greyed out when Type is None. |
 | **Trigger channel** | The MIDI channel the trigger message must arrive on, or **Any**. This is about *listening*; it is not where the output sends. |
 | **Number** | CC number, program number or note number (0–127). |
-| **Op** | CC only: how the received value is compared with **Value** — `=` exactly, `<=` below or equal, `>=` above or equal, `<` below, `>` above. Greyed out when Value is **Any**. |
-| **Value** | CC value to compare against, or **Any** (matches every value, operator ignored). Greyed out for PC and Note. |
+| **Value** (operator and value) | CC only. The dropdown says how the received value is compared with the number: `=` exactly, `<=` below or equal, `>=` above or equal, `<` below, `>` above. The field is the CC value to compare against, or **Any** (matches every value; the operator is then ignored and greyed out). Both are greyed out for PC and Note. |
 | **Learn** | Captures the next trigger from your controller (see below). |
 | Footer | The last MIDI message received — handy for finding out what a controller button sends. |
+
+The window height is resizable (if your host allows it); the width is fixed. The default height shows eight outputs; making it shorter (down to three) or taller (up to all 16) changes how many are visible, and the list scrolls when not all are. The toolbar, column headings and footer stay in place. The height is saved with your project.
 
 All number fields are typed entry. Press **Return** or click away to apply; **Esc** cancels. Values are clamped to their valid range, and for *Trigger channel* and *Value* you can type `Any` (or `0` / `-1`). Hover over a control for a tooltip.
 
@@ -63,6 +65,8 @@ If several outputs match, the **lowest-numbered output wins**. Outputs whose Typ
 **Notes.** A note-on goes to the active output. Its note-off (and any polyphonic aftertouch) goes to **the output the note-on went to**, even if you have switched since, so nothing sticks. If MidiRouter never saw the note-on, the note-off goes to the active output.
 
 **Sustain (CC 64).** Pedal down goes to the active output only, and that output is remembered as sustaining. Pedal up goes to the active output **and** every output still marked as sustaining.
+
+**Always on.** If an output is set to *Always on*, every routed message above is also sent to that output's channel (once, if it is also the active output). Notes and sustain are tracked for both, so note-offs and pedal-up reach both outputs even if you switch in between. Switching does not reset the always-on output's pitch bend or mod wheel. Trigger messages for other outputs are still swallowed; the always-on output's own trigger is ignored, so its message is routed like any other.
 
 **Everything else** — other CCs, pitch bend, channel pressure, non-trigger program changes — goes to the active output's channel. System messages (clock, start/stop, sysex) pass through unchanged.
 

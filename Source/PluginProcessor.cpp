@@ -118,6 +118,7 @@ juce::ValueTree MidiRouterAudioProcessor::routerStateToTree() const
 {
     juce::ValueTree tree (routerTreeId);
     tree.setProperty ("resetOnSwitch", settings.getResetOnSwitch(), nullptr);
+    tree.setProperty ("alwaysOn", settings.getAlwaysOn(), nullptr);
 
     for (int i = 0; i < midirouter::numOutputs; ++i)
     {
@@ -140,6 +141,7 @@ void MidiRouterAudioProcessor::routerStateFromTree (const juce::ValueTree& tree)
         return;
 
     settings.setResetOnSwitch ((bool) tree.getProperty ("resetOnSwitch", true));
+    settings.setAlwaysOn ((int) tree.getProperty ("alwaysOn", -1));
 
     for (int i = 0; i < juce::jmin (tree.getNumChildren(), midirouter::numOutputs); ++i)
     {
@@ -157,6 +159,7 @@ void MidiRouterAudioProcessor::routerStateFromTree (const juce::ValueTree& tree)
 void MidiRouterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty ("editorHeight", editorHeight, nullptr);
     state.removeChild (state.getChildWithName (routerTreeId), nullptr);
     state.appendChild (routerStateToTree(), nullptr);
 
@@ -174,6 +177,7 @@ void MidiRouterAudioProcessor::setStateInformation (const void* data, int sizeIn
             return;
 
         routerStateFromTree (state.getChildWithName (routerTreeId));
+        editorHeight = (int) state.getProperty ("editorHeight", 0);
         apvts.replaceState (state);
         settings.cancelLearn();
         settings.setActiveOutput (activeParam->get() - 1);

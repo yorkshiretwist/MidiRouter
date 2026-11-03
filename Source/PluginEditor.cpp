@@ -64,12 +64,12 @@ void ActiveIndicator::paintButton (juce::Graphics& g, bool isOver, bool)
     const auto size = (float) Theme::ActiveDot::sizePx;
     auto area = getLocalBounds().toFloat().withSizeKeepingCentre (size, size);
 
-    g.setColour (active ? Theme::ActiveDot::activeColour : Theme::ActiveDot::inactiveColour);
+    g.setColour (active ? on : off);
     g.fillEllipse (area);
 
-    if (isOver)
+    if (isOver && isEnabled())
     {
-        g.setColour (Theme::ActiveDot::overColour);
+        g.setColour (hover);
         g.drawEllipse (area, 2.0f);
     }
 }
@@ -81,6 +81,13 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     addAndMakeVisible (active);
     active.setTooltip ("Make output " + juce::String (index + 1) + " the active output. It sends on MIDI channel " + juce::String (index + 1));
     active.onClick = [this] { processor.setActiveOutputFromUI (index); };
+
+    addAndMakeVisible (alwaysOn);
+    alwaysOn.setTooltip ("Always on: this output also receives everything sent to the active output, and its trigger is ignored. Only one output can be always on; click again to turn it off");
+    alwaysOn.onClick = [this]
+    {
+        settings.setAlwaysOn (settings.getAlwaysOn() == index ? -1 : index);
+    };
 
     auto styleCombo = [] (juce::ComboBox& box)
     {
@@ -149,6 +156,9 @@ OutputRow::OutputRow (MidiRouterAudioProcessor& p, int i)
     learn.setColour (juce::TextButton::textColourOffId, Theme::LearnButton::textColour);
     learn.onClick = [this]
     {
+        if (settings.getAlwaysOn() == index)
+            return;
+
         if (settings.getLearnTarget() == index)
             settings.cancelLearn();
         else
@@ -165,7 +175,10 @@ void OutputRow::refresh()
     const bool isActive = settings.getActiveOutput() == index;
     const bool learning = settings.getLearnTarget() == index;
 
+    const bool isAlways = settings.getAlwaysOn() == index;
+
     active.setActive (isActive);
+    alwaysOn.setActive (isAlways);
 
     if (type.getSelectedId() != (int) c.type + 1)
         type.setSelectedId ((int) c.type + 1, juce::dontSendNotification);
@@ -179,6 +192,7 @@ void OutputRow::refresh()
 
     // Fields stay editable on a "None" output (editing one turns it into a CC trigger),
     // but are dimmed; fields that don't apply to PC/Note triggers are disabled.
+    // An always-on output has no trigger: everything in the trigger section (and Learn) is disabled.
     auto show = [] (juce::Component& comp, bool enabled, bool dimmed)
     {
         comp.setEnabled (enabled);
@@ -186,10 +200,12 @@ void OutputRow::refresh()
     };
     const bool none = c.type == midirouter::TriggerType::none;
     const bool isCC = c.type == midirouter::TriggerType::cc;
-    show (triggerChannel, true, none);
-    show (number, true, none);
-    show (op, (none || isCC) && c.value >= 0, none); // "Any" ignores the operator
-    show (value, none || isCC, none);
+    show (type, ! isAlways, false);
+    show (triggerChannel, ! isAlways, none);
+    show (number, ! isAlways, none);
+    show (op, ! isAlways && (none || isCC) && c.value >= 0, none); // "Any" ignores the operator
+    show (value, ! isAlways && (none || isCC), none);
+    show (learn, ! isAlways, false);
 
     learn.setButtonText (learning ? "Cancel" : "Learn");
     learn.setColour (juce::TextButton::buttonColourId,
@@ -222,6 +238,8 @@ void OutputRow::resized()
 
     r.removeFromLeft (numberW + 4);
     active.setBounds (r.removeFromLeft (activeW));
+    r.removeFromLeft (gap);
+    alwaysOn.setBounds (r.removeFromLeft (alwaysW).withSizeKeepingCentre (activeW, r.getHeight()));
     r.removeFromLeft (gap);
     type.setBounds (r.removeFromLeft (typeW));
     r.removeFromLeft (gap);
@@ -269,12 +287,25 @@ MidiRouterAudioProcessorEditor::MidiRouterAudioProcessorEditor (MidiRouterAudioP
     addAndMakeVisible (version);
 
     for (int i = 0; i < midirouter::numOutputs; ++i)
-        addAndMakeVisible (rows.add (new OutputRow (processor, i)));
+        rowsHolder.addAndMakeVisible (rows.add (new OutputRow (processor, i)));
 
+    viewport.setViewedComponent (&rowsHolder, false);
+    viewport.setScrollBarsShown (true, false);
+    viewport.getVerticalScrollBar().setColour (juce::ScrollBar::thumbColourId, Theme::Field::focusBorderColour.withAlpha (0.8f));
+    addAndMakeVisible (viewport);
+
+    // Fixed width. The default height shows defaultVisibleRows rows; the maximum shows all of them.
     using namespace Theme;
-    const int rowsH = midirouter::numOutputs * (Row::heightPx + Row::gapPx);
+    const int chrome = Window::marginPx * 2 + 30 + TopBar::heightPx + ColumnHeader::heightPx + Footer::heightPx;
+    const int rowH = Row::heightPx + Row::gapPx;
+    const int defaultHeight = chrome + Window::defaultVisibleRows * rowH;
+    const int maxHeight = chrome + midirouter::numOutputs * rowH;
+    const int minHeight = chrome + Window::minVisibleRows * rowH;
+
+    setResizable (true, true);
+    setResizeLimits (Window::widthPx, minHeight, Window::widthPx, maxHeight);
     setSize (Window::widthPx,
-             Window::marginPx * 2 + 30 + TopBar::heightPx + ColumnHeader::heightPx + rowsH + Footer::heightPx);
+             juce::jlimit (minHeight, maxHeight, processor.editorHeight > 0 ? processor.editorHeight : defaultHeight));
 
     startTimerHz (20);
 }
@@ -305,11 +336,11 @@ void MidiRouterAudioProcessorEditor::paint (juce::Graphics& g)
     };
 
     col ("Active", OutputRow::activeW);
+    col ("Always on", OutputRow::alwaysW);
     col ("Type", OutputRow::typeW);
     col ("Trigger channel", OutputRow::fieldW);
     col ("Number", OutputRow::fieldW);
-    col ("Op", OutputRow::opW);
-    col ("Value", OutputRow::fieldW);
+    col ("Value", OutputRow::opW + gap + OutputRow::fieldW); // spans the operator and value columns
 }
 
 void MidiRouterAudioProcessorEditor::resized()
@@ -326,15 +357,23 @@ void MidiRouterAudioProcessorEditor::resized()
 
     r.removeFromTop (ColumnHeader::heightPx);
 
-    for (auto* row : rows)
-    {
-        row->setBounds (r.removeFromTop (Row::heightPx));
-        r.removeFromTop (Row::gapPx);
-    }
-
     auto footer = r.removeFromBottom (Footer::heightPx);
     version.setBounds (footer.removeFromRight (80));
     lastMidi.setBounds (footer);
+
+    // Whatever is left holds the scrolling rows.
+    viewport.setBounds (r);
+    const int rowsW = viewport.getMaximumVisibleWidth();
+    rowsHolder.setSize (rowsW, midirouter::numOutputs * (Row::heightPx + Row::gapPx));
+
+    int y = 0;
+    for (auto* row : rows)
+    {
+        row->setBounds (0, y, rowsW, Row::heightPx);
+        y += Row::heightPx + Row::gapPx;
+    }
+
+    processor.editorHeight = getHeight();
 }
 
 juce::String MidiRouterAudioProcessorEditor::describeMidi (uint32_t packed)

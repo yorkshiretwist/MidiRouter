@@ -42,6 +42,7 @@ namespace midirouter
         void resetToDefaults()
         {
             activeOutput.store (0);
+            alwaysOn.store (-1);
             resetOnSwitch.store (true);
             learnTarget.store (-1);
             panicRequested.store (false);
@@ -79,12 +80,27 @@ namespace midirouter
         int getActiveOutput() const { return clampInt (activeOutput.load(), 0, numOutputs - 1); }
         void setActiveOutput (int i) { activeOutput.store (clampInt (i, 0, numOutputs - 1)); }
 
+        /** -1 = none, otherwise the output that also receives everything sent to the active output.
+            Its trigger is ignored. Selecting one cancels a learn armed on that output. */
+        int getAlwaysOn() const { return clampInt (alwaysOn.load(), -1, numOutputs - 1); }
+        void setAlwaysOn (int i)
+        {
+            alwaysOn.store (clampInt (i, -1, numOutputs - 1));
+            if (i >= 0 && learnTarget.load() == i)
+                learnTarget.store (-1);
+        }
+
         bool getResetOnSwitch() const { return resetOnSwitch.load(); }
         void setResetOnSwitch (bool b) { resetOnSwitch.store (b); }
 
         /** -1 when not learning, otherwise the output waiting for a message. */
         int getLearnTarget() const { return learnTarget.load(); }
-        void startLearn (int output) { learnTarget.store (clampInt (output, 0, numOutputs - 1)); }
+        void startLearn (int output)
+        {
+            output = clampInt (output, 0, numOutputs - 1);
+            if (output != getAlwaysOn()) // an always-on output has no trigger to learn
+                learnTarget.store (output);
+        }
         void cancelLearn() { learnTarget.store (-1); }
 
         void requestPanic() { panicRequested.store (true); }
@@ -106,6 +122,7 @@ namespace midirouter
 
         std::array<Output, (size_t) numOutputs> outputs;
         std::atomic<int> activeOutput { 0 };
+        std::atomic<int> alwaysOn { -1 };
         std::atomic<bool> resetOnSwitch { true };
         std::atomic<int> learnTarget { -1 };
         std::atomic<bool> panicRequested { false };

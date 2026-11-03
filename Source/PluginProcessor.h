@@ -50,6 +50,9 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    /** Last editor height (message thread only); 0 = never opened. Saved in the plugin state. */
+    int editorHeight = 0;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 

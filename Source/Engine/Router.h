@@ -27,6 +27,7 @@ namespace midirouter
         void reset()
         {
             noteOutput.fill (0);
+            noteAlways.fill (0);
             sustaining.fill (false);
         }
 
@@ -56,7 +57,8 @@ namespace midirouter
         {
             const int type = m.status & 0xF0;
             const int ch = m.status & 0x0F;
-            int active = settings.getActiveOutput();
+            const int active = settings.getActiveOutput();
+            const int always = settings.getAlwaysOn(); // -1 = none
 
             if (m.status >= 0xF0)
             {
@@ -89,6 +91,9 @@ namespace midirouter
 
             for (int o = 0; o < numOutputs; ++o)
             {
+                if (o == always)
+                    continue; // an always-on output's trigger has no effect
+
                 const auto c = settings.getOutput (o);
 
                 if (c.number != m.data1 || (c.triggerChannel != 0 && c.triggerChannel != ch + 1))
@@ -127,7 +132,7 @@ namespace midirouter
             {
                 if (switchTo >= 0 && switchTo != active)
                 {
-                    if (settings.getResetOnSwitch())
+                    if (settings.getResetOnSwitch() && active != always) // the always-on output keeps receiving everything
                         resetControllers (m.offset, active, sink);
 
                     settings.setActiveOutput (switchTo);
@@ -136,42 +141,64 @@ namespace midirouter
             }
 
             auto channelOf = [] (int output) { return (uint8_t) output; }; // output N sends on channel N
+            auto emit = [&] (int statusType, int output) { sink (m.offset, (uint8_t) (statusType | channelOf (output)), m.data1, m.data2); };
+
+            // The always-on output also gets everything; when it is the target already it is sent once.
+            const int alsoActive = (always >= 0 && always != active) ? always : -1;
 
             if (isNoteOn)
             {
-                noteOutput[(size_t) (ch * 128 + m.data1)] = (uint8_t) (active + 1);
-                sink (m.offset, (uint8_t) (0x90 | channelOf (active)), m.data1, m.data2);
+                const auto idx = (size_t) (ch * 128 + m.data1);
+                noteOutput[idx] = (uint8_t) (active + 1);
+                noteAlways[idx] = (uint8_t) (alsoActive + 1);
+                emit (0x90, active);
+                if (alsoActive >= 0)
+                    emit (0x90, alsoActive);
             }
             else if (type == 0x80 || type == 0x90 || type == 0xA0)
             {
                 // Note-off (incl. note-on vel 0) or poly aftertouch follows its note-on.
-                auto& held = noteOutput[(size_t) (ch * 128 + m.data1)];
-                const int out = held ? held - 1 : active;
+                const auto idx = (size_t) (ch * 128 + m.data1);
+                const bool known = noteOutput[idx] != 0;
+                const int out = known ? noteOutput[idx] - 1 : active;
+                const int alsoOut = known ? noteAlways[idx] - 1 : ((always >= 0 && always != out) ? always : -1);
                 if (type != 0xA0)
-                    held = 0;
-                sink (m.offset, (uint8_t) (type | channelOf (out)), m.data1, m.data2);
+                {
+                    noteOutput[idx] = 0;
+                    noteAlways[idx] = 0;
+                }
+                emit (type, out);
+                if (alsoOut >= 0)
+                    emit (type, alsoOut);
             }
             else if (type == 0xB0 && m.data1 == 64)
             {
                 if (m.data2 >= 64)
                 {
                     sustaining[(size_t) active] = true;
-                    sink (m.offset, (uint8_t) (0xB0 | channelOf (active)), (uint8_t) 64, m.data2);
+                    emit (0xB0, active);
+                    if (alsoActive >= 0)
+                    {
+                        sustaining[(size_t) alsoActive] = true;
+                        emit (0xB0, alsoActive);
+                    }
                 }
                 else
                 {
-                    // Sustain up: active output plus any output still sustaining.
+                    // Sustain up: active output, the always-on output, and any output still sustaining.
                     for (int o = 0; o < numOutputs; ++o)
                     {
-                        if (sustaining[(size_t) o] || o == active)
-                            sink (m.offset, (uint8_t) (0xB0 | channelOf (o)), (uint8_t) 64, m.data2);
+                        if (sustaining[(size_t) o] || o == active || o == always)
+                            emit (0xB0, o);
                         sustaining[(size_t) o] = false;
                     }
                 }
             }
             else
             {
-                sink (m.offset, (uint8_t) (type | channelOf (active)), m.data1, m.data2);
+                emit (type, active);
+                if (alsoActive >= 0)
+                    emit (type, alsoActive);
             }
         }
 
@@ -202,6 +229,7 @@ namespace midirouter
 
         RouterSettings& settings;
         std::array<uint8_t, 16 * 128> noteOutput {}; // [inChannel*128 + note] -> output+1 (0 = not held)
+        std::array<uint8_t, 16 * 128> noteAlways {}; // same index -> always-on output+1 the note-on was also sent to (0 = none)
         std::array<bool, (size_t) numOutputs> sustaining {};
     };
 }

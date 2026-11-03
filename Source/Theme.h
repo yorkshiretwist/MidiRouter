@@ -26,7 +26,12 @@ namespace Theme
         inline const juce::Colour titleTextColour { juce::Colours::white };
         constexpr float titleFontSizePx = 18.0f;
 
-        constexpr int widthPx    = 600;
+        // Fixed width. Only the height can be changed: the default shows defaultVisibleRows
+        // rows, the minimum shows minVisibleRows and the maximum shows every row;
+        // when the window is shorter than that the rows scroll.
+        constexpr int widthPx    = 660;
+        constexpr int minVisibleRows = 3;
+        constexpr int defaultVisibleRows = 8;
         constexpr int marginPx   = 16;
         constexpr int gapPx      = 8;
     }
@@ -75,6 +80,15 @@ namespace Theme
         inline const juce::Colour overColour     { 0xff6366f1 };
 
         constexpr int sizePx = 16;
+    }
+
+    //==============================================================================
+    // The round "always on" radio button (this output also receives everything sent to the active one)
+    namespace AlwaysOnDot
+    {
+        inline const juce::Colour activeColour   { 0xffa855f7 };
+        inline const juce::Colour inactiveColour { 0xff26262b };
+        inline const juce::Colour overColour     { 0xffa855f7 };
     }
 
     //==============================================================================
