@@ -80,6 +80,9 @@ target_compile_definitions(MidiRouter
         JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_DISPLAY_SPLASH_SCREEN=0
         JUCE_MODAL_LOOPS_PERMITTED=0
+        # Linux: use plain X11 mouse events instead of XInput2. With XInput2 the plugin UI only
+        # received button presses in Reaper and Carla (no hover, release, resize or scroll).
+        $<$<PLATFORM_ID:Linux>:JUCE_USE_XINPUT=0>
 )
 
 target_link_libraries(MidiRouter
