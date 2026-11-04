@@ -25,6 +25,8 @@ macOS builds are not signed or notarized; allow them under System Settings → P
 
 ## The window
 
+![Screenshot of MidiRouter](../graphics/screenshot-1.png)
+
 | Control | What it does |
 |---|---|
 | **Reset pitch bend / mod wheel on switch** | When the active output changes, centres the pitch bend and zeroes the mod wheel on the instrument being switched away from, so it isn't left bent or modulated. |

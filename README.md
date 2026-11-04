@@ -4,6 +4,8 @@ A cross-platform **MIDI effect plugin** (VST3, CLAP, and AU on macOS) that route
 
 It was built for a live rig where a MIDI controller's buttons send fixed messages and one of several instruments (for example eight plugins in Carla, each behind a *MIDI Channel Filter*) must respond at a time. Triggers are configurable, so MidiRouter can match whatever your controller sends.
 
+![Screenshot of MidiRouter](graphics/screenshot-1.png)
+
 ## Features
 
 - **16 outputs**; output N always sends on MIDI channel N, so a per-instrument *MIDI Channel Filter* set to channel N picks it up
